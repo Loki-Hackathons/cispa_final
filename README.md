@@ -69,7 +69,8 @@ cispa_final/
 │   ├── submit.py              # API submission
 │   ├── analyze.py             # Result analysis
 │   ├── dashboard.py           # Terminal TUI (fallback)
-│   ├── team_state.py          # Shared state JSON
+│   ├── team_state.py          # Shared state JSON (tasks + jobs progress)
+│   ├── job_progress.py        # Report Slurm progress → dashboard
 │   ├── wandb_utils.py         # W&B helper
 │   └── requirements.txt
 └── task_N_<name>/attempt1/     # Created when subject drops
@@ -93,7 +94,11 @@ squeue -A training2557
 
 ### Team dashboard (browser)
 
-Edit `dashboard/config.py` → set `MODE = "mock"` (local) or `MODE = "live"` (cluster).
+Edit `dashboard/config.py` → `MODE = "mock"` (local) or `"live"` (cluster). Optional: `LEADERBOARD_URL`, `LEADERBOARD_TASK_IDS`.
+
+Features: next actions, job progress/ETA, failed jobs, cluster GPUs, score deltas, command copy chips.
+
+Long GPU jobs must use `shared/job_progress.py` — see skill `job-progress` and [docs/dashboard-roadmap.md](docs/dashboard-roadmap.md).
 
 ```bash
 # Local dev (mock data)

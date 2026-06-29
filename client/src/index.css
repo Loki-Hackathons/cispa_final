@@ -1,0 +1,85 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+  LOKI ops dashboard — dark, restrained palette.
+  Scene: a teammate at 3am in a dim lab, glancing at a laptop to see if a GPU
+  job is still running and whether the submit cooldown cleared. Dark earns its
+  place: long sessions, low light, status colors must pop.
+  Strategy: tinted-cool neutrals + one indigo accent; green/amber/red carry state.
+*/
+:root {
+  --background: oklch(0.169 0.012 256);
+  --foreground: oklch(0.961 0.004 256);
+  --card: oklch(0.208 0.013 256);
+  --card-foreground: oklch(0.961 0.004 256);
+  --popover: oklch(0.214 0.013 256);
+  --popover-foreground: oklch(0.961 0.004 256);
+  --primary: oklch(0.63 0.17 274);
+  --primary-foreground: oklch(0.98 0.012 274);
+  --secondary: oklch(0.27 0.012 256);
+  --secondary-foreground: oklch(0.961 0.004 256);
+  --muted: oklch(0.27 0.012 256);
+  --muted-foreground: oklch(0.715 0.014 256);
+  --accent: oklch(0.29 0.014 256);
+  --accent-foreground: oklch(0.961 0.004 256);
+  --destructive: oklch(0.64 0.2 18);
+  --destructive-foreground: oklch(0.98 0.012 18);
+  --border: oklch(0.3 0.012 256);
+  --input: oklch(0.32 0.012 256);
+  --ring: oklch(0.63 0.17 274);
+  --radius: 0.625rem;
+  --status-running: oklch(0.75 0.15 152);
+  --status-pending: oklch(0.8 0.13 80);
+  --status-mock: oklch(0.8 0.13 80);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-status-running: var(--status-running);
+  --color-status-pending: var(--status-pending);
+  --color-status-mock: var(--status-mock);
+
+  --font-sans: "DM Sans", system-ui, sans-serif;
+  --font-heading: "DM Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+  }
+}

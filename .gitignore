@@ -1,0 +1,13 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+team_state.json
+logs/
+output/
+*.npz
+*.pt
+.DS_Store
+client/node_modules/
+client/dist/

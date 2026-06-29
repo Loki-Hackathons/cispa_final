@@ -103,6 +103,21 @@ Log each submission in `slurm/submitted.log` and update `docs/notes-communes.md`
 - Jobs are independent — coordinate who takes how many GPUs before submitting
 - If you finish early, `scancel` your job to free quota for teammates
 
+### Dashboard ETA (live mode)
+
+| Job state | What the dashboard shows | Is it real? |
+|-----------|--------------------------|-------------|
+| **RUNNING** + `job_progress` | **Reported** or **Extrapolated** from `step/total_steps` | **Yes** — if scripts call `shared/job_progress.py` |
+| **RUNNING** (no progress) | `TIME_LIMIT − elapsed` ("Limit left") | **No** — worst-case until Slurm kills the job |
+| **RUNNING** (stale heartbeat) | "Stalled?" | Progress not updated in >120s |
+| **PENDING** | `START_TIME − now` ("Est. start") if set | **Approximate** |
+
+**Job progress protocol:** every GPU job >10 min must call `bind_job()` + `report()` — see [dashboard-roadmap.md](dashboard-roadmap.md) and skill `job-progress`.
+
+Queue order: **running jobs first**, then **pending by Slurm priority** (position `#1`, `#2`, …).
+
+**Ops panels:** next actions, failed jobs (`sacct`), per-teammate summary, cluster GPU idle (`sinfo`), leaderboard (when `LEADERBOARD_URL` set in `dashboard/config.py`), copy-paste command chips.
+
 ### Multi-GPU within one job
 
 SLURM gives you N GPUs; your code must use them:

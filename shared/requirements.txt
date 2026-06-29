@@ -1,0 +1,16 @@
+torch
+torchvision
+numpy
+pandas
+requests
+scikit-learn
+Pillow
+opencv-python
+wandb
+torchattacks
+timm
+optuna
+rich
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.0

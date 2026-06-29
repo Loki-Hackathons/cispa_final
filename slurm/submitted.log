@@ -1,0 +1,5 @@
+# Append-only log of SLURM submissions.
+# Format: YYYY-MM-DD HH:MM | user | task/script | job_id=XXXX | NxGPU | note
+#
+# Example:
+# 2026-06-29 14:05 | ansart1 | task_1/attempt1/run.sh | job_id=123456 | 2xGPU | lock_ram iteration

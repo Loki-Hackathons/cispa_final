@@ -191,7 +191,7 @@ python shared/analyze.py <file> --task-id <TASK_ID> --mode api --dataset <path>
 | `notes-communes.md` assignments + GPU table updated | |
 | ACLs: everyone can write to shared folder | |
 | API keys in cluster `.env`, not in git | |
-| Browser dashboard works (`MODE = "mock"` in `dashboard/config.py`) | |
+| Browser dashboard: next actions, progress, failures (mock) | |
 | Live dashboard on cluster + SSH tunnel tested | |
 
 ---

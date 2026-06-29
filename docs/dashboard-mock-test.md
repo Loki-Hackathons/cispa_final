@@ -58,7 +58,22 @@ Invoke-RestMethod http://127.0.0.1:8080/api/health
 Invoke-RestMethod http://127.0.0.1:8080/api/status
 ```
 
-Expected: yellow **mock** banner, 2 SLURM jobs, 3 tasks with cooldowns.
+Expected mock UI:
+
+- **Next actions** strip (submit/query ready, node packs, failures)
+- **4 SLURM jobs** with progress bars on running jobs (job progress protocol)
+- **Failed job** example (`sacct` panel)
+- **Cluster** GPU idle summary
+- **Leaderboard** mock rows
+- **Scores** with Δ column
+- Toggle **Alerts on** for browser notifications when gates open
+
+Run scripts from repo root `cispa_final/`, not `client/`:
+
+```powershell
+cd c:\...\cispa_final
+.\scripts\run_dashboard.ps1
+```
 
 ### Common Windows errors
 
@@ -67,7 +82,7 @@ Expected: yellow **mock** banner, 2 SLURM jobs, 3 tasks with cooldowns.
 | `export` not recognized | Don't use bash `export` — edit `dashboard/config.py` instead |
 | `uvicorn` not recognized | Use `python -m uvicorn ...` |
 | `bash` not found | Use `.\scripts\build_dashboard.ps1` instead of `.sh` |
-| Port 8080 in use | Change `PORT` in `config.py` and use that port in the URL |
+| `scripts\run_dashboard.ps1` not found | Run from `cispa_final/`, not `client/` |
 
 ---
 
