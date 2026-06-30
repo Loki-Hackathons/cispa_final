@@ -47,6 +47,9 @@ See full guidelines in this file — think before coding, simplicity first, surg
 | [docs/cluster-guide.md](docs/cluster-guide.md) | SSH, venv, SLURM, tmux, ACLs, multi-GPU |
 | [README.md](README.md) | Repo map, quick commands |
 | [docs/recherche_preparation_hackathon.md](docs/recherche_preparation_hackathon.md) | PGD / adversarial robustness theory |
+| [docs/mgi-member-vs-generated-inference.md](docs/mgi-member-vs-generated-inference.md) | **Finals required reading** — MGI, DCB, image provenance |
+| [docs/TextSeal_a_localized_llm_watermark_for_provenance_and_distillation_protection.md](docs/TextSeal_a_localized_llm_watermark_for_provenance_and_distillation_protection.md) | **Finals required reading** — LLM watermark, localization, radioactivity |
+| [docs/when_the_curious_abandon_honesty_federated_learning_is_not_private.md](docs/when_the_curious_abandon_honesty_federated_learning_is_not_private.md) | **Finals required reading** — FL gradient leakage, trap weights |
 | [.env.example](.env.example) | `CISPA_BASE_URL`, `CISPA_API_KEY`, W&B |
 | [slurm/templates/](slurm/templates/) | SLURM headers (1/2/4 GPU) |
 | [slurm/submitted.log](slurm/submitted.log) | Job submission history |
@@ -101,8 +104,35 @@ Module: [shared/job_progress.py](shared/job_progress.py). Skill: `job-progress`.
 | Submit / cooldowns | skill `hackathon-api` + `shared/submit.py` |
 | Job progress / ETA | skill `job-progress` + `shared/job_progress.py` |
 | Adversarial theory | `docs/recherche_preparation_hackathon.md` |
+| Image member vs generated / data circuits / autoencoder signals | `docs/mgi-member-vs-generated-inference.md` |
+| Text watermarking / provenance / distillation detection | `docs/TextSeal_a_localized_llm_watermark_for_provenance_and_distillation_protection.md` |
+| Federated learning privacy / gradient reconstruction | `docs/when_the_curious_abandon_honesty_federated_learning_is_not_private.md` |
 
 When the subject is not released, use `../CISPA_Regional/` only as **pattern reference**.
+
+### Finals required reading (organizer-assigned)
+
+Three papers were assigned before the Grand Finals. Use them for **inspiration and threat-model context** — always defer to `docs/subject/subject.md` for actual task specs.
+
+1. **MGI (Member vs Generated Inference)** — [`docs/mgi-member-vs-generated-inference.md`](docs/mgi-member-vs-generated-inference.md)
+   - Task: given image + generative model, classify sample as training member vs model output (harder than MIA).
+   - Key failure mode: CPD / likelihood scores high for both members and generated samples.
+   - **DCB pipeline:** Stage 1 = autoencoder score \(L_A\) (double reconstruction ratio + VQ quantization error) separates generated from natural; Stage 2 = standard MIA (ICAS) on non-generated; Stage 3 = cross-generator \(\phi(x,c)\) KDE for derivative models (\(M_2\) trained on \(M_1\) outputs).
+   - Models evaluated: VAR, RAR, LlamaGen, Stable Diffusion 1.4/2.1. Metric: TPR@1%FPR.
+   - Hackathon hooks: multi-signal cascades, threshold tuning (`tune_thresholds.py`), white-box model access (encoder + generator).
+
+2. **TextSeal** — [`docs/TextSeal_a_localized_llm_watermark_for_provenance_and_distillation_protection.md`](docs/TextSeal_a_localized_llm_watermark_for_provenance_and_distillation_protection.md)
+   - Distortion-free Gumbel-max watermark with **dual-key routing** (\(\alpha\)) for output diversity.
+   - Detection: entropy-weighted scores, moment-matched Gamma \(p\)-values, **geometric cover search** for localized regions in diluted documents.
+   - **Radioactivity:** watermark bias transfers through distillation; detect via teacher-forcing + PRF scoring.
+   - Hackathon hooks: statistical detection tests, FPR control, segment-level attribution in mixed content.
+
+3. **Trap weights / FL is not private** — [`docs/when_the_curious_abandon_honesty_federated_learning_is_not_private.md`](docs/when_the_curious_abandon_honesty_federated_learning_is_not_private.md)
+   - Passive: FC-layer gradients contain scaled inputs; ReLU zeros leak individual batch items.
+   - Active: server sends **trap weights** (adversarial FC init) → perfect extraction by projecting gradients to input space — no iterative optimization.
+   - Scales to ImageNet \(B=100\), FedAvg, CNNs (with extensions).
+   - Defenses: DP (users must add noise locally), leaky ReLU, compression/dropout, TEE.
+   - Hackathon hooks: gradient-based attacks/defenses, weight inspection, batch-size effects.
 
 ### Tools & platforms
 

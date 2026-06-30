@@ -160,3 +160,17 @@ Optional: copy `.env.example` to `.env` for local API tests. Never commit `.env`
 - [Hackathon start guide](docs/hackathon-start-guide.md) — day-0 checklist
 - [Cluster guide](docs/cluster-guide.md) — JURECA, SLURM, tmux, ACLs
 - [Shared notes](docs/notes-communes.md) — assignments, jobs, decisions
+
+### Required reading (finals — organizer-assigned)
+
+These three papers were **explicitly assigned** before the Grand Finals. Read them for task inspiration, threat models, and method patterns — not as a substitute for `docs/subject/subject.md` when the subject drops.
+
+| Paper | Local doc | Core idea |
+|-------|-----------|-----------|
+| **MGI: Member vs Generated Inference** (Zhao et al., CISPA) | [docs/mgi-member-vs-generated-inference.md](docs/mgi-member-vs-generated-inference.md) | Distinguish *training members* from *model-generated* outputs in image generative models (IARs, diffusion). Standard MIA and attribution fail because likelihood scores overlap. **DCB** (Data Circuit Breaker): 3-stage cascade — (1) autoencoder self-consistency (reconstruction + VQ quantization error) filters generated samples; (2) MIA on remaining natural samples; (3) cross-generator CPD for model-derivative / data-circuit settings. Robust to verbatim memorization. |
+| **TextSeal** (Sander et al., Meta) | [docs/TextSeal_a_localized_llm_watermark_for_provenance_and_distillation_protection.md](docs/TextSeal_a_localized_llm_watermark_for_provenance_and_distillation_protection.md) | Distortion-free LLM watermark (Gumbel-max + dual-key routing for diversity). **Entropy-weighted detection** + **multi-region localization** in mixed human/AI documents. **Radioactive**: watermark survives distillation — detect unauthorized use of model outputs. Zero inference overhead; compatible with speculative decoding. |
+| **When the Curious Abandon Honesty** (Boenisch et al.) | [docs/when_the_curious_abandon_honesty_federated_learning_is_not_private.md](docs/when_the_curious_abandon_honesty_federated_learning_is_not_private.md) | FL is not private by default: gradients leak training data. **Trap weights** — active server re-initializes FC-layer weights so ReLU activations isolate single batch items; **perfect reconstruction** from gradient projection (no optimization). Scales to ImageNet batches of 100. Defenses: DP (CDP fails vs malicious server), large local batches, leaky ReLU, lossy layers. |
+
+**When to consult:** image provenance / MGI / data circuits → MGI paper; text watermarking / provenance / distillation detection → TextSeal; gradient leakage / FL privacy / weight manipulation attacks → trap-weights paper.
+
+Claude Project setup: [docs/claude-project-instructions.md](docs/claude-project-instructions.md) — copy-paste system instructions + knowledge upload list.
