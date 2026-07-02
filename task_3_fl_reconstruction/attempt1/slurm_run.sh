@@ -13,21 +13,22 @@
 
 # Task 3 reconstruction job.
 #   Analytic-only is CPU/ms — run it on the login node.
-#   Use this GPU job for --optimize on hard models (e.g. ViT 9, 11).
+#   Use this GPU job for --optimize on hard MLP models (e.g. 1, 4, 5, 8).
 #
 # Submit:  sbatch slurm_run.sh
 set -euo pipefail
 
 module load GCC CUDA PyTorch torchvision
 
-cd /p/scratch/training2625/dougnon1/Loki/FL_Data_Reconstruction
-source .venv/bin/activate
+export TASK3_DATA_ROOT=/p/scratch/training2625/dougnon1/Loki/FL_Data_Reconstruction
+cd /p/scratch/training2625/dougnon1/Loki/cispa_final/task_3_fl_reconstruction/attempt1
+source "$TASK3_DATA_ROOT/.venv/bin/activate"
 
 mkdir -p output
 
-# Analytic pass over everything, then optimize the hard MLP-style models.
+# Analytic pass over everything, then optimize the hard MLP models.
 python run.py --out submission.pt
-python run.py --base submission.pt --optimize --models 1 4 --steps 4000 --out submission.pt
+python run.py --base submission.pt --optimize --models 1 4 5 8 --steps 4000 --out submission.pt
 
 python submit.py --check submission.pt
 echo "done!"
