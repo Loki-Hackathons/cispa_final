@@ -40,14 +40,34 @@ export WML_DATASET_DIR="$DATA"
 export WML_WATERMARK_YAML="$DATA/watermark_config.yaml"
 export PYTHONPATH="$REPO:$PYTHONPATH"
 
-# No outbound network on JURECA compute nodes: force HF offline and skip the proxy LM
-# entirely (the entropy feature falls back to the offline novelty proxy).
+# No outbound network on JURECA compute nodes: force HF offline (harmless — the correct
+# pipeline uses no HF model, only the pinned vendor detector repos).
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
-export WML_DISABLE_PROXY_LM=1
+
+# The correct signals come from the pinned vendor repos (textseal / lm-watermarking /
+# unigram-watermark). They are git submodules and must be synced on a LOGIN node first
+# (compute nodes have no network):
+#     bash scripts/task1/sync_watermark_repos.sh
+VENDOR_CORE="$REPO/task_1_text_watermark/vendor/textseal/textseal/watermarking/core.py"
+if [ ! -f "$VENDOR_CORE" ]; then
+  echo "ERROR: vendor detector repos missing ($VENDOR_CORE)." >&2
+  echo "       Run on a LOGIN node first: bash scripts/task1/sync_watermark_repos.sh" >&2
+  exit 1
+fi
 
 cd "$REPO/task_1_text_watermark/melissa"
 mkdir -p logs outputs
+
+# One-time cleanup when the feature pipeline changes: a stale calibrator trained on the
+# old feature layout would crash predict, and stale partial scores would be reused by the
+# resume logic. The sentinel makes this happen exactly once after an upgrade.
+SENTINEL="outputs/.pipeline_vendor_v1"
+if [ ! -f "$SENTINEL" ]; then
+  echo "Pipeline upgraded (vendor signals) — clearing stale calibrator + partial scores."
+  rm -f outputs/calibrator_*.pkl outputs/submission.partial.jsonl
+  touch "$SENTINEL"
+fi
 
 echo "GPU: $(python -c 'import torch; print(torch.cuda.get_device_name(0))' 2>/dev/null || echo 'CPU')"
 
@@ -56,6 +76,8 @@ if [ -f "$CALIB" ]; then
   echo "[1/3] Calibrator already exists ($CALIB) — skipping training."
   echo "[2/3] Skipping validation eval (calibrator unchanged)."
 else
+  # Fresh model → drop any partial predictions from a previous model.
+  rm -f outputs/submission.partial.jsonl
   echo "[1/3] Train calibrator ($MODEL) ..."
   python -u -m src.train_calibrator --model "$MODEL"
 
