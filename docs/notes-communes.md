@@ -35,14 +35,12 @@ See `docs/subject/subject.md`. Leaderboard: http://35.192.205.84/leaderboard_pag
 
 | Person | judoor user | Role | Task | Directory |
 |--------|-------------|------|------|-----------|
-| Alexandre | ansart1 | **Owner** | **Task 1 — Text Watermark** | `task_1_text_watermark/attempt1/` |
-| Bastian | paoli1? | Teammate | **Task 1 — Text Watermark** | `task_1_text_watermark/attempt1/` |
-| Melissa | abider1? | Teammate | **Task 1 — Text Watermark** | `task_1_text_watermark/attempt1/` |
-| Florian | dougnon1 | Teammate | **Task 2 — MGI** | `task_2_mgi/attempt1/` |
+| Alexandre | ansart1 | **Owner** | **Task 1 — Text Watermark** | `task_1_text_watermark/alexandre/` |
+| Melissa | abider1? | Teammate | **Task 1 — Text Watermark** | `task_1_text_watermark/melissa/` |
+| Florian | dougnon1 | **Owner** | **Task 2 — MGI** | `task_2_mgi/attempt1/` |
+| Bastian | paoli1 | **Owner** | **Task 3 — FL Reconstruction** | `task_3_fl_reconstruction/attempt1/` |
 
-Task 3 (FL reconstruction): unassigned.
-
-Confirm judoor usernames for Bastian/Melissa if different.
+Confirm judoor username for Melissa if different.
 
 ## GPU budget
 
@@ -73,7 +71,8 @@ Run browser dashboard or `python shared/dashboard.py` for cooldown status.
 | Time | Person | Decision |
 |------|--------|----------|
 | 2026-07-02 | Alexandre | JUDAC granted (`judac.fz-juelich.de`); JURECA still pending for GPU |
-| 2026-07-02 | Team | Task 1: Alexandre + Bastian + Melissa · Task 2: Florian · Task 3: TBD |
+| 2026-07-02 | Team | Task 1: Alexandre + Melissa · Task 2: Florian · Task 3: Bastian |
+| 2026-07-02 | Alexandre | Corrected assignments: Bastian → Task 3 (not Task 1) |
 | 2026-07-02 | Alexandre | ansart1 → Task 1 (Text Watermark Localization) |
 | 2026-07-02 | Alexandre | Task 1 vendor submodules pinned (textseal, lm-watermarking, unigram) + `watermark_config.yaml` in repo |
 

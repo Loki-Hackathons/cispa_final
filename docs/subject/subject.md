@@ -19,9 +19,9 @@ Datasets are downloaded by `hackathon_setup.sh` into the team scratch folder.
 
 | Task | People | Directory |
 |------|--------|-----------|
-| **1** Text Watermark Localization | **Alexandre**, **Bastian**, **Melissa** | `task_1_text_watermark/attempt1/` |
+| **1** Text Watermark Localization | **Alexandre**, **Melissa** | `task_1_text_watermark/` |
 | **2** MGI | **Florian** | `task_2_mgi/attempt1/` |
-| 3 FL gradient reconstruction | TBD | `task_3_fl_reconstruction/attempt1/` |
+| **3** FL gradient reconstruction | **Bastian** | `task_3_fl_reconstruction/attempt1/` |
 
 ## Tasks
 
@@ -65,9 +65,9 @@ Full spec: [Task 3 Description.md](../Task%203%20Description.md)
 ## Task directories (repo)
 
 ```
-task_1_text_watermark/attempt1/   ← Alexandre, Bastian, Melissa
+task_1_text_watermark/            ← Alexandre, Melissa
 task_2_mgi/attempt1/              ← Florian
-task_3_fl_reconstruction/attempt1/
+task_3_fl_reconstruction/attempt1/ ← Bastian
 ```
 
 Official `task_template.py` / `main.py` land in scratch after `hackathon_setup.sh`.

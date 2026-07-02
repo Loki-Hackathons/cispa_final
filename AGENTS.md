@@ -169,9 +169,9 @@ ssh -L 8080:localhost:8080 <user>@jureca.fz-juelich.de
 
 | Task | People | Title | Spec |
 |------|--------|-------|------|
-| **1** | **ansart1**, paoli1?, abider1? | Text Watermark Localization | [Task 1 Text Watermark Localization.md](docs/Task%201%20Text%20Watermark%20Localization.md) |
+| **1** | **ansart1**, abider1? | Text Watermark Localization | [Task 1 Text Watermark Localization.md](docs/Task%201%20Text%20Watermark%20Localization.md) |
 | **2** | **dougnon1** | MGI | [Task 2 Description.md](docs/Task%202%20Description.md) |
-| 3 | TBD | FL gradient reconstruction | [Task 3 Description.md](docs/Task%203%20Description.md) |
+| **3** | **paoli1** | FL gradient reconstruction | [Task 3 Description.md](docs/Task%203%20Description.md) |
 
 **Task 1:** score each token ∈ [0,1] for watermark-active generation in mixed docs (TextSeal, Gumbel-Max, Unigram, KGW). Keys + detectors in YAML; aggregate noisy detector signals. Dataset `SprintML/watermark_localization`; tokenizer `Qwen/Qwen2.5-7B-Instruct`. See spec for KGW CUDA gotcha.
 

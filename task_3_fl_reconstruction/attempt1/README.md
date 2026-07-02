@@ -1,5 +1,7 @@
 # Task 3 — FL Data Reconstruction from Gradients
 
+**Owner:** Bastian Paoli (`paoli1`)
+
 Official spec: `docs/Task 3 Description.md`
 
 **Operational guide (paths, models, API, strategy):** [TASK3_GUIDE.md](TASK3_GUIDE.md)

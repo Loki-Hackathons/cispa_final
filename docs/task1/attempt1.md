@@ -1,260 +1,233 @@
 # Tâche 1 — Attempt 1 (Alexandre)
 
-**Responsable :** Alexandre (ansart1)  
-**Code :** [`task_1_text_watermark/alexandre/`](../../task_1_text_watermark/alexandre/)  
-**Spec :** [`docs/subject/task_1.md`](../subject/task_1.md) · **Métrique :** [`docs/task1/scoring.md`](scoring.md)
+**Responsable :** Alexandre (ansart1)
+**Code :** [`task_1_text_watermark/alexandre/`](../../task_1_text_watermark/alexandre/)
+**Spec :** [`docs/subject/task_1.md`](../subject/task_1.md)
 
 ---
 
-## État actuel (2026-07-02)
+## État actuel (2026-07-02, fin de journée)
 
-| Élément | Statut |
-|---|---|
-| Pipeline HMM (approche retenue) | ✅ implémenté et testé |
-| Soumission API **#30** (3 détecteurs, sans KGW) | ✅ acceptée — score public **0.0065** |
-| Précalcul KGW sur JURECA (job `15399747`) | ✅ `kgw_{train,validation,test}.npz` sur cluster |
-| Soumission avec KGW (job `15399857`) | ⏳ job SLURM lancé — score API **en attente** |
-| Val locale TPR @ 0.1% FPR (sans KGW, scores flottants) | **0.0185** |
+| Élément                                       | Statut                                                                    |
+| ---------------------------------------------- | -------------------------------------------------------------------------- |
+| Pipeline HMM (v1, abandonné)                   | ❌ remplacé — trop de faux positifs de bordure, score plafonné            |
+| Pipeline semi-Markov (v2, **retenu**)          | ✅ implémenté, testé, soumis                                              |
+| Soumission #30 (HMM, sans KGW)                 | score public **0.0065**                                                  |
+| Soumission #101 (HMM + KGW)                    | score public **0.0071**                                                  |
+| **Soumission #159 (semi-Markov, sans KGW)**    | **score public 0.2001** — nouveau best, ×28 vs #101                      |
+| Val locale TPR@0.1%FPR — HMM v1                | 0.0185 (float) / 0.0140 (arrondi 6 déc.)                                  |
+| Val locale TPR@0.1%FPR — semi-Markov v2        | **0.2822**                                                                |
+| KGW dans v2                                    | ❌ pas encore intégré — fichiers restés sur JURECA, session SSH expirée   |
+| Unigram                                        | ❌ gelé — greenlist non reproduite malgré plusieurs variantes testées     |
 
-**Meilleur score leaderboard connu :** 0.0065 (soumission #30). La soumission avec les 4 détecteurs devrait faire mieux une fois le job `15399857` terminé.
+**Meilleur score leaderboard public : 0.2001** (soumission #159, `submission_id=159`). Le gain principal vient d'un changement de modèle (HMM → semi-Markov à longueurs discrètes) et de la correction d'un bug de signal (n-grammes répétés), pas d'un détecteur supplémentaire.
 
 ---
 
 ## 1. Objectif et métrique
 
-Pour **chaque token** de chaque document test, prédire un score ∈ [0, 1] : confiance que le token a été généré **pendant qu’un watermarking était actif** (label binaire 0/1 en train/val, caché en test).
+Pour **chaque token** de chaque document test, prédire un score ∈ [0, 1] : confiance que le token a été généré **pendant qu'un watermarking était actif** (label binaire 0/1 en train/val, caché en test).
 
-La métrique leaderboard n’est **pas** une régression MSE : c’est **TPR @ 0.1% FPR** sur **tous les tokens poolés** (voir [`scoring.md`](scoring.md)). Il faut classer les tokens watermarkés au-dessus de quasi tous les tokens clean, avec un budget de faux positifs très faible (1 clean sur 1000 max).
+La métrique est **TPR @ 0.1% FPR**, calculée sur **tous les tokens poolés** (pas par document) : on fixe le seuil τ tel que ≤ 0.1 % des tokens clean (label 0) aient un score ≥ τ, puis on mesure la fraction de tokens watermarkés au-dessus de ce même τ. C'est une métrique de **rang pur** : le budget de faux positifs autorisé est minuscule (51 tokens clean sur 90 documents de validation), donc les quelques tokens clean les mieux notés déterminent tout le score.
 
-**Quatre familles** possibles dans le dataset (souvent mélangées dans un même document) : TextSeal, Gumbel-Max, Unigram, KGW. On ne prédit pas *quelle* famille — seulement *watermark actif ou non*.
-
----
-
-## 2. Infrastructure
-
-| Ressource | Chemin |
-|---|---|
-| Dataset (local) | `cispa_final/data/watermark_localization/{train,validation,test}.jsonl` |
-| Dataset (cluster) | `/p/scratch/training2625/ansart1/loki/watermark_localization/` |
-| Clés + params détecteurs | [`task_1_text_watermark/watermark_config.yaml`](../../task_1_text_watermark/watermark_config.yaml) |
-| Repos vendor (commits épinglés) | `task_1_text_watermark/vendor/{textseal,lm-watermarking,unigram-watermark}/` |
-| API | `CISPA_BASE_URL` + `CISPA_API_KEY` dans `.env` (cluster) · task id **`30-watermark-localization`** |
-| Soumission / historique | `shared/submit.py` → `history/submissions.jsonl` |
-| Eval locale + viewer | `shared/task1_eval.py` → `history/task1_viz/*.json` |
-
-**Tokenizer :** `Qwen/Qwen2.5-7B-Instruct`. Utiliser les `token_ids` du JSONL tels quels — ne pas retokenizer le champ `text`.
-
-**Volumes :** train 90 docs · val 90 docs · test 1 320 docs (~1,4 M tokens en test).
+**Quatre familles** de watermark possibles, souvent mélangées dans un même document : TextSeal, Gumbel-Max, Unigram, KGW. On ne prédit pas *quel* schéma — seulement *watermark actif ou non*.
 
 ---
 
-## 3. Pipeline actuel (vue d’ensemble)
+## 2. Pourquoi le HMM (v1) a été abandonné
+
+Le premier pipeline (HMM à états `clean` / `schéma i`, transitions fixes, forward-backward) donnait un score val de 0.0185 — cohérent mais très en dessous de ce que les signaux bruts suggéraient. Analyse post-soumission #101 :
+
+- **Score saturation / bleeding de bordure** : le posterior HMM se répand sur les tokens clean adjacents à une vraie span watermarkée. Sur les 51 faux positifs consommant tout le budget FPR à 0.1 %, 31 étaient à moins de 10 tokens d'une frontière de span réelle.
+- **KGW dégradait le score val** (0.0185 → 0.0066) au lieu de l'améliorer — signe d'un problème de calibration plus profond que la simple fusion de signaux.
+- Un test de log-odds non bornés (sans compression logistique) donnait un résultat identique : le problème n'était pas la précision numérique, mais la structure même du modèle.
+
+**Diagnostic racine, trouvé en creusant plus loin :** un bug de calcul de signal, pas seulement un problème de modèle (voir §4).
+
+---
+
+## 3. Infrastructure
+
+| Ressource                        | Chemin                                                                                             |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Dataset (local)                  | `cispa_final/data/watermark_localization/{train,validation,test}.jsonl`                            |
+| Dataset (cluster)                | `/p/scratch/training2625/ansart1/loki/watermark_localization/`                                     |
+| Clés + params détecteurs         | [`task_1_text_watermark/watermark_config.yaml`](../../task_1_text_watermark/watermark_config.yaml) |
+| Repos vendor (commits épinglés)  | `task_1_text_watermark/vendor/{textseal,lm-watermarking,unigram-watermark}/`                       |
+| API                              | `CISPA_BASE_URL` + `CISPA_API_KEY` dans `.env` · task id `30-watermark-localization`                |
+| Soumission / historique          | `shared/submit.py` → `history/submissions.jsonl`                                                    |
+| Eval locale + viewer             | `shared/task1_eval.py` → `history/task1_viz/*.json`                                                 |
+
+**Tokenizer :** `Qwen/Qwen2.5-7B-Instruct`. On utilise les `token_ids` du JSONL tels quels — pas de retokenization du champ `text`.
+
+**Volumes :** train 90 docs · val 90 docs · test 1 320 docs (~1,4 M tokens).
+
+---
+
+## 4. Bug trouvé : évidence fantôme sur n-grammes répétés
+
+Les PRF (TextSeal, Gumbel-Max, KGW) seedent leur tirage aléatoire sur un n-gramme de contexte. **Si le même n-gramme apparaît deux fois dans un document, le PRF ré-émet exactement le même tirage** — ce n'est pas une nouvelle observation indépendante, juste une répétition.
+
+Un document de validation contenait la séquence répétée `letters . letters . letters . ...` (40+ fois) dans une zone **clean**. Chaque répétition du n-gramme accumulait la même valeur de signal, faisant grimper le z-score de fenêtre à **34** dans une région sans watermark — ce document à lui seul absorbait la moitié du budget de faux positifs à 0.1 % FPR.
+
+**Fix (`detectors.py::_dedup_mask`)** : pour chaque n-gramme de contexte, seule sa **première occurrence** dans le document porte le signal ; les répétitions reçoivent la valeur H0 neutre (aucune évidence). Ce comportement correspond à ce que fait un détecteur correct (déduplication de n-grammes), pas une heuristique ad hoc.
+
+Impact isolé de ce fix (mesuré sur le nouveau modèle) : élimine la quasi-totalité des faux positifs "de répétition" qui dominaient le budget FPR.
+
+---
+
+## 5. Signaux par token (`detectors.py`)
+
+| Schéma         | Signal                                                       | Clés / params (YAML)                                             | H0 (attendu)        |
+| -------------- | -------------------------------------------------------------- | -------------------------------------------------------------------- | ---------------------- |
+| **TextSeal**   | Dual-key Gumbel : `α·g(r_a)+(1-α)·g(r_b)`, `g(r)=-log(1-r)`   | `key_a`, `key_b`, `ngram=3`, `α=0.5`                                | μ=1, σ²=0.5          |
+| **Gumbel-Max** | `-log(1-r)` sur PRF uniforme                                  | `secret_key`, `ngram=2`                                             | μ=1, σ²=1 (Exp(1))   |
+| **Unigram**    | 1 si token ∈ greenlist fixe                                    | `watermark_key`, `fraction=0.5`, `vocab_size=151643`                | Bernoulli(0.5)         |
+| **KGW**        | *pas calculé en local* — nécessite CUDA Philox                | `gamma=0.25`, schéma `ff-anchored_minhash_prf-4-True-1306382177`   | Bernoulli(0.25)        |
+
+**Implémentation PRF :** chargement direct de `vendor/textseal/textseal/watermarking/core.py` (`prf_uniform`) via `importlib`, sans importer le package `textseal` complet (évite la dépendance `nltk`).
+
+**Unigram — gelé, avec preuve.** J'ai retesté sérieusement cette piste : 2 méthodes de génération de greenlist (`np.random.default_rng(key)` direct, et seedé par `sha256(key)`) croisées avec 4 tailles de vocabulaire (151643 / 151665 / 151936 / 152064), évaluées sur les spans watermarkées *non expliquées* par TextSeal/Gumbel-Max — **séparément sur train et sur val**. Résultat : aucune variante ne montre de séparation stable entre spans watermarkées et clean sur les deux splits à la fois (ex. `sha256`@151936 : z≈1.2 sur wm mais z≈1.4 sur clean — corrélation de bruit, pas un greenlist). Une piste antérieure (session précédente) rapportait un z=5.3 pour une variante proche ; elle ne s'est pas reproduite sous ce protocole train/val séparé, probablement mesurée sans tenue hors-échantillon. **Unigram reste exclu du modèle** faute de signal confirmé.
+
+---
+
+## 6. Modèle retenu : semi-Markov à segments (`smm_scorer.py`)
+
+### Pourquoi semi-Markov et pas HMM
+
+Les longueurs de spans observées sur train+val sont **quasi discrètes** :
 
 ```
-token_ids (JSONL)
-       │
-       ├─► detectors.py ──► signaux CPU : TextSeal, Gumbel-Max, Unigram
-       │
-       └─► kgw_scores.py (GPU JURECA, une fois) ──► masques green/red par token
-                │
-                ▼
-         hmm_scorer.py
-           · fit émissions LLR sur train (spans → schéma par heuristique z)
-           · forward-backward → P(watermark actif) par token
-                │
-                ▼
-         run_hmm.py → validation_scores.jsonl + submission.jsonl
-                │
-                ├─► task1_eval.py (val, si labels)
-                └─► submit.py (test → leaderboard)
+31: 64 spans   47: 133 spans   63: 163 spans
+95: 145 spans  159: 158 spans  320: 73 spans   (93% du total, reste = longue traîne)
 ```
 
-**Approche retenue :** modèle de Markov caché (HMM) — voir section 5. Les approches fusion z-score (`build_scores.py`) et régression logistique (`train_calibrator.py`) ont été testées puis **abandonnées** (sections 6).
+Un HMM standard (transitions token-à-token) ne peut pas exploiter cette structure — il "devine" les frontières une transition à la fois, ce qui produit le bleeding observé en v1. Un modèle **semi-Markov** (segments explicites) score directement des fenêtres de longueur candidate et fait un forward-backward sur les *segmentations* du document plutôt que sur les *tokens*.
+
+### Structure du modèle
+
+- Un document = concaténation de segments : soit un **token clean isolé** (coût nul), soit une **span watermarkée** de longueur `L ∈ LENGTHS` avec un prior de longueur empirique `p(L)` (calibré sur les comptes train+val ci-dessus, + 7% de masse résiduelle pour les longueurs hors-liste et les spans tronquées en bord de document).
+- **Émission d'une span** : modèle de décalage gaussien sur les signaux standardisés (z-scores sous H0). Pour un décalage hypothétique `shift` :
+
+  ```
+  LLR(s, e, schéma) = shift · Σx[s:e] − (e−s) · shift² / 2
+  ```
+
+  combiné par `logsumexp` sur 3 hypothèses de `shift` par schéma (valeurs estimées sur train : TextSeal ≈ 0.45–0.9, Gumbel-Max ≈ 0.55–1.1) et sur les schémas disponibles (TextSeal, Gumbel-Max ; KGW prêt mais pas encore branché — voir §8).
+- **Spans tronquées** : gérées explicitement par des hypothèses préfixe `[0, e)` et suffixe `[s, n)` avec un prior dédié, pour les documents qui commencent ou finissent en plein milieu d'un watermark.
+- **Score par token** : posterior exact `P(token appartient à un segment watermarké | document)`, calculé par forward-backward en log-espace (`scipy.special.logsumexp`), converti en log-odds puis compressé par une sigmoïde à température (température = 40, choisie pour garder une résolution fine sans jamais saturer à 0/1 exactement).
+
+### Pourquoi ça résout le boundary bleed sans heuristique manuelle
+
+Un token profond dans une span appartient à très peu de segmentations alternatives plausibles (toutes le couvrent). Un token de bordure appartient à des segmentations où il est "dans" la span *et* à des segmentations où il n'y est pas (span plus courte) — le posterior fait cette moyenne automatiquement, pondérée par le prior de longueur. C'est ce que l'heuristique `min(gauche, droite)` visait à approximer manuellement (voir §7) ; le calcul exact fait mieux.
+
+### Résultat
+
+| Version                          | Val TPR@0.1%FPR | Score public |
+| ---------------------------------- | ------------------ | -------------- |
+| HMM v1 (sans KGW, arrondi 6 déc.) | 0.0140              | 0.0065 (#30)   |
+| HMM v1 + KGW                      | 0.0066 ⚠️          | 0.0071 (#101)  |
+| **Semi-Markov v2 (sans KGW, précision pleine)** | **0.2822** | **0.2001 (#159)** |
 
 ---
 
-## 4. Signaux par token (`detectors.py`)
+## 7. Approches intermédiaires testées et abandonnées
 
-Chaque détecteur produit **une statistique par position** `t`, à partir des `token_ids` uniquement (pas de forward pass du LLM).
+| Approche                                         | Fichier              | Val TPR@0.1%FPR | Pourquoi abandonnée                                                                 |
+| --------------------------------------------------- | ---------------------- | ------------------ | ---------------------------------------------------------------------------------- |
+| Fusion z-score + sigmoïde                          | `build_scores.py`     | ~0.0016             | Pas de structure de span, seuil arbitraire                                          |
+| Régression logistique multi-features               | `train_calibrator.py` | ~0.0070             | Classification token-à-token, pas de transitions/segments                          |
+| HMM forward-backward                                | `hmm_scorer.py`        | 0.0185              | Bleeding de bordure token-à-token (voir §2)                                        |
+| Matched filter (fenêtres discrètes) + `min(g,d)`   | `matched_filter.py`    | ~0.023              | Sélection gloutonne de fenêtres non-chevauchantes = perte d'info vs posterior exact |
 
-| Schéma | Signal | Clés / params (YAML) | H0 (attendu) |
-|---|---|---|---|
-| **TextSeal** | Dual-key Gumbel : `α·g(r_a)+(1-α)·g(r_b)`, `g(r)=-log(1-r)` | `key_a`, `key_b`, `ngram=3`, `α=0.5` | μ=1, σ²=0.5 |
-| **Gumbel-Max** | `-log(1-r)` sur PRF uniforme | `secret_key`, `ngram=2` | μ=1, σ²=1 (Exp(1)) |
-| **Unigram** | 1 si token ∈ greenlist fixe | `watermark_key`, `fraction=0.5`, `vocab_size=151643` | Bernoulli(0.5) |
-| **KGW** | *non calculé ici* — voir `kgw_scores.py` | `gamma=0.25`, schéma `ff-anchored_minhash_prf-4-True-1306382177` | Bernoulli(0.25) |
-
-**Implémentation PRF :** chargement direct de `vendor/textseal/textseal/watermarking/core.py` (`prf_uniform`) via `importlib`, sans importer le package `textseal` complet (évite `nltk`, etc.).
-
-**Validation train (moyennes span wm vs clean) :**
-
-```
-textseal  : wm ≈ 1.12   clean ≈ 1.01
-gumbelmax : wm ≈ 1.27   clean ≈ 1.01
-```
-
-TextSeal et Gumbel-Max sont **correctement répliqués** (signal réel, séparation modeste token à token).
-
-**Unigram — point ouvert :** le `vocab_size` exact n’est pas dans le YAML. Avec `151643` (Qwen2.5 standard), la séparation est quasi nulle sur les spans « résiduelles ». Scan de tailles voisines : signaux faibles, pas de confirmation forte. Le HMM n’assigne que **~199 tokens** au pool d’entraînement Unigram → contribution limitée aujourd’hui.
+Conservées dans le repo comme référence ; **ne pas les réutiliser pour une soumission**.
 
 ---
 
-## 5. Précalcul KGW (`kgw_scores.py` + job SLURM)
+## 8. Pourquoi la soumission actuelle est sans KGW
 
-KGW **doit** utiliser `torch.randperm` sur un `torch.Generator` **CUDA** (Philox). Sur CPU, les greenlists ne correspondent pas à la génération organisateur → ~75 % des tokens KGW semblent « clean ».
+KGW nécessite `torch.randperm` sur un `torch.Generator` **CUDA** (Philox) pour reproduire exactement la génération des organisateurs — impossible à recalculer sur CPU (sur CPU, les greenlists ne correspondent pas et ~75 % des tokens KGW ressortent faussement "clean"). Les masques ont été précalculés sur JURECA lors d'une session précédente (`kgw_scores.py`, job `15399747`, ~6 min sur A100), mais :
 
-**Job terminé :** `15399747` (`run_kgw.sh`, 1× A100, ~6 min train+val + ~5 min test).
+1. Le fichier de sortie `kgw_{train,validation,test}.npz` et le log du probe (`slurm_15399747.out`, qui contient le `vocab_size` retenu) sont restés sur le cluster.
+2. La connexion SSH multiplexée (`ControlMaster`) utilisée pour éviter de redemander un TOTP à chaque appel a expiré entre les deux sessions de travail.
+3. Rapatrier ces fichiers nécessite donc un nouveau TOTP — **prochaine étape**, en attente.
 
-| Fichier produit | Contenu |
-|---|---|
-| `output/kgw_train.npz` | `document_id → float32[m]` (0 ou 1 par token scorable ; 0.25 avant fenêtre) |
-| `output/kgw_validation.npz` | idem |
-| `output/kgw_test.npz` | idem (~602 KB) |
-
-**Algorithme :** réplique du détecteur `lm-watermarking` — n-grams de longueur 4 (self-salt, Algorithm 3), greenlist via `torch.randperm(vocab_size)` sur GPU. `vocab_size` par défaut **151936** (config Qwen2.5) ; mode `--probe` compare 5 candidats sur train labellé.
-
-**Chemin cluster :** `/p/home/jusers/ansart1/jureca/code/cispa_final/task_1_text_watermark/alexandre/output/kgw_*.npz`
+Le code de `smm_scorer.py` est déjà prêt à recevoir KGW comme signal supplémentaire (`extra={"kgw": mask_array}`, avec déduplication de n-grammes déjà branchée pour ce schéma aussi). Environ 40 % des spans train ne sont expliquées ni par TextSeal ni par Gumbel-Max (probablement du KGW pur) — c'est le principal levier restant.
 
 ---
 
-## 6. Modèle HMM (`hmm_scorer.py`) — cœur de la soumission
+## 9. Le score val (0.2822) transfère-t-il tel quel au leaderboard ?
 
-### Pourquoi un HMM ?
+**Non — et le résultat obtenu (0.2001 public) le confirme.** Raisons attendues de l'écart :
 
-Les stats brutes par token sont bruitées ; la métrique à FPR = 0.1 % pénalise les **pics isolés** et favorise des **spans contigus** bien localisés. Un HMM impose des transitions rares clean ↔ watermark sans lissage manuel.
-
-### Structure
-
-- **États :** `clean` + un état par schéma dont le signal est disponible (`textseal`, `gumbelmax`, `unigram`, `kgw` si `.npz` chargé).
-- **Émissions :**
-  - TextSeal / Gumbel-Max (continus) : **LLR non paramétrique** — 40 bins quantiles, densités H1 vs H0 fitées sur train.
-  - Unigram / KGW (binaires) : LLR Bernoulli fermé.
-  - État `clean` : émission 0 (log-likelihood nulle).
-- **Transitions (fixes, non apprises) :** `p_enter=0.005` (clean → schéma wm), `p_exit=0.010` (schéma → clean).
-- **Entraînement des émissions :** chaque span watermarkée du train est assignée au schéma avec le **z-score span le plus élevé** (seuil `z ≥ 3`). Les tokens de cette span alimentent le pool H1 du schéma gagnant ; tous les tokens clean alimentent H0.
-
-**Pools H1 fités (train, sans KGW) :** TextSeal 11 915 · Gumbel-Max 15 390 · Unigram 199 · KGW 0.  
-Avec les `.npz` KGW, un 4ᵉ état est ajouté automatiquement au fit.
-
-### Inférence
-
-Forward-backward en log-espace → **score token = 1 − P(état clean | séquence)**.
-
-**Résultat val (sans KGW, scores flottants) :** TPR @ 0.1% FPR = **0.0185** (vs ~0.0016 fusion z naïve, vs ~0.007 régression logistique).
-
-### Bug connu — arrondi à 6 décimales
-
-`run_hmm.py` écrit `round(score, 6)` dans le JSONL. À FPR = 0.1 %, cela **dégrade** la métrique : val passe de **0.0185 → 0.0140** sur le même modèle. La soumission #30 a été envoyée avec cet arrondi. **À corriger** avant la prochaine resoumission (scores float64 pleine précision).
+- **Risque d'optimisme du val** : pendant le débogage, j'ai inspecté les faux positifs sur validation pour diagnostiquer le bug de n-grammes répétés (§4). Corriger un vrai bug de signal est légitime, mais le pipeline final a de fait été affiné en observant le comportement sur val — un léger optimisme est donc attendu, pas une garantie de transfert 1:1.
+- **Taille et bruit du budget FPR** : val n'a que 90 documents → budget de 51 tokens clean pour 0.1 % FPR, un échantillon petit et bruyant. Test a 1 320 documents (~15×), donc un budget bien plus large et une estimation plus stable statistiquement, mais qui peut différer selon le mix réel de schémas/longueurs dans test.
+- **Écart observé** : 0.2822 (val) vs 0.2001 (test public) — une baisse d'environ 30 % relatifs, cohérente avec un effet d'optimisme modéré plutôt qu'un problème de généralisation grave. L'ordre de grandeur (×28 vs la précédente meilleure soumission) est ce qui compte le plus ici.
+- Le score officiel final utilisera par ailleurs un **sous-ensemble caché** de test révélé après la clôture des soumissions (mentionné dans la réponse API) — le score public actuel (0.2001) n'est donc pas nécessairement le score final.
 
 ---
 
-## 7. Soumissions et scores
+## 10. Prochaines étapes, par impact attendu
 
-| # | Méthode | KGW | Val TPR@0.1%FPR | Score API (public) | Fichier |
-|---|---|---|---|---|---|
-| 30 | HMM forward-backward, 3 PRF | ❌ | 0.0185 (float) / 0.0140 (arrondi) | **0.0065** | `output/submission.jsonl` |
-| (en cours) | HMM + 4 détecteurs | ✅ | *job `15399857`* | *en attente* | idem (écrasé à la fin du job) |
-
-Soumission #30 : validée par `task_template.validate_predictions`, envoyée via `shared/submit.py`. Traces : `history/submissions.jsonl`, viewer `history/task1_viz/hmm_no_kgw_v1.json`.
-
-**Lecture des scores :** un ranker aléatoire donne TPR@0.1%FPR ≈ 0.001 par construction. **0.0065 ≈ 6,5× le hasard** — signal réel mais modeste ; l’absence de KGW (~42 % des spans train non expliquées par TextSeal/Gumbel) plafonne fortement le rappel.
+1. **Intégrer KGW** dans le semi-Markov (fichiers déjà calculés, juste à rapatrier — TOTP nécessaire). Plus gros levier restant : ~40 % des spans train ne sont expliquées par aucun des deux schémas actuellement modélisés.
+2. **Vérifier le probe KGW** (`slurm_15399747.out`) pour confirmer le `vocab_size` retenu, et tempérer les émissions KGW (facteur `shift` plus faible que TextSeal/Gumbel si le signal binaire s'avère plus faible que prévu) avant de resoumettre.
+3. **Apprentissage des priors de longueur / shifts par EM (Baum-Welch semi-Markov)** au lieu de valeurs fixes estimées à la main sur train.
+4. **Cross-validation train+val (180 docs)** pour réduire le bruit de l'estimation TPR@0.1%FPR utilisée pour piloter les choix de modèle.
+5. **Pondération par entropie** (forward pass `Qwen2.5-7B-Instruct` sur GPU, comme dans le papier TextSeal) pour concentrer le signal sur les tokens à haute incertitude.
+6. **Couverture géométrique** (`localized_detect` du vendor TextSeal) pour les spans très diluées dans un document mixte.
 
 ---
 
-## 8. Approches abandonnées (référence)
+## 11. Comment exécuter
 
-| Approche | Fichiers | Val TPR@0.1%FPR | Pourquoi abandonnée |
-|---|---|---|---|
-| Fusion z-score + sigmoïde | `build_scores.py` | ~0.0016 | Pas de structure de span, seuil arbitraire |
-| Régression logistique multi-features | `features.py`, `train_calibrator.py` | ~0.007 | Classifieur token-à-token, pas de transitions |
+### Local (CPU) — semi-Markov, sans KGW
 
-Conservées dans le repo pour comparaison ; **ne pas soumettre**.
-
----
-
-## 9. Limites actuelles et prochaines étapes
-
-**Par impact attendu :**
-
-1. **Soumission avec KGW** — job `15399857` ; levier principal (~¼ des tokens wm ≈ KGW pur aujourd’hui ignorés).
-2. **Supprimer l’arrondi `round(..., 6)`** dans `run_hmm.py` — quick win mesuré (−25 % TPR relatif sur val).
-3. **Confirmer `vocab_size` Unigram** — tokenizer HF sur cluster ou alignement avec la greenlist organisateur.
-4. **Baum-Welch** — apprendre `p_enter` / `p_exit` au lieu de valeurs manuelles.
-5. **Pondération entropie TextSeal** — forward pass `Qwen2.5-7B-Instruct` (GPU) comme dans le paper.
-6. **Assignation span→schéma souple** (EM) au lieu du cutoff `z ≥ 3`.
-7. **Cross-val** train+val (180 docs) pour estimer TPR@0.1%FPR moins bruité.
-8. **Couverture géométrique** (`localized_detect` vendor TextSeal) pour spans diluées.
-
----
-
-## 10. Comment exécuter
-
-### Local (CPU) — sans KGW
-
-Prérequis : dataset dans `data/watermark_localization/`, Python avec `torch`, `numpy`, `scipy`, `scikit-learn`.
+Prérequis : dataset dans `data/watermark_localization/`, Python avec `torch`, `numpy`, `scipy`.
 
 ```bash
 cd cispa_final/task_1_text_watermark/alexandre
 
-python run_hmm.py \
-  --data-dir ../../data/watermark_localization \
-  --out-dir output \
-  --splits validation test
+python run_smm.py --split validation --out val_scores.jsonl
+python run_smm.py --split test --out submission.jsonl
 
 python ../../shared/task1_eval.py \
   --dataset ../../data/watermark_localization/validation.jsonl \
-  --predictions output/validation_scores.jsonl \
-  --method "HMM: TextSeal+GumbelMax+Unigram (no KGW)" \
-  --out hmm_no_kgw_v1
+  --predictions val_scores.jsonl \
+  --method "semi-Markov segment posterior (TextSeal+GumbelMax), ngram-dedup"
 
-python ../../shared/submit.py output/submission.jsonl \
+python ../../shared/submit.py submission.jsonl \
   --task-id 30-watermark-localization --action submit --owner ansart1 \
-  --method "HMM forward-backward (no KGW)"
+  --method "semi-Markov segment posterior, no KGW"
 ```
 
-### JURECA — pipeline complet avec KGW
+### Avec KGW (une fois les `.npz` rapatriés)
 
-**Compte :** `training2625` · **Réservation :** `cispahack` · **Partition :** `dc-gpu`
+```bash
+python run_smm.py --split test --out submission.jsonl --kgw output/kgw_test.npz
+```
+
+### JURECA — précalcul KGW (déjà fait, job `15399747`)
 
 ```bash
 jutil env activate -p training2625
 cd /p/home/jusers/ansart1/jureca/code/cispa_final/task_1_text_watermark/alexandre
-
-# Étape 1 — précalcul KGW (GPU, ~10 min) — DÉJÀ FAIT (job 15399747)
-sbatch run_kgw.sh
-# → output/kgw_{train,validation,test}.npz
-
-# Étape 2 — HMM + eval val + submit API (job 15399857 ou manuel)
-sbatch run_hmm_submit.sh
-```
-
-**Exécution manuelle** (sur nœud compute, pas login node — conflit venv/module PyTorch) :
-
-```bash
-module load GCC CUDA PyTorch torchvision
-source /p/scratch/training2625/ansart1/loki/watermark_localization/.venv/bin/activate
-export PYTHONPATH=/p/home/jusers/ansart1/jureca/code/cispa_final/task_1_text_watermark/alexandre:...
-
-python run_hmm.py \
-  --data-dir /p/scratch/training2625/ansart1/loki/watermark_localization \
-  --kgw-dir output \
-  --out-dir output \
-  --splits validation test
+sbatch run_kgw.sh   # -> output/kgw_{train,validation,test}.npz
 ```
 
 ---
 
-## 11. Carte des fichiers
+## 12. Carte des fichiers
 
-| Fichier | Rôle |
-|---|---|
-| **`detectors.py`** | Signaux PRF CPU : TextSeal, Gumbel-Max, Unigram |
-| **`kgw_scores.py`** | Masques green KGW (CUDA Philox obligatoire) |
-| **`hmm_scorer.py`** | Fit LLR + forward-backward HMM |
-| **`run_hmm.py`** | CLI principale : fit train → score val/test → JSONL |
-| **`run_kgw.sh`** | SLURM : précalcul KGW |
-| **`run_hmm_submit.sh`** | SLURM : HMM + eval + `submit.py` |
-| `build_scores.py` | *(abandonné)* fusion z-score |
-| `features.py`, `train_calibrator.py` | *(abandonné)* régression logistique |
+| Fichier                              | Rôle                                                          |
+| --------------------------------------- | ---------------------------------------------------------------- |
+| `detectors.py`                        | Signaux PRF CPU (TextSeal, Gumbel-Max, Unigram) + dédup n-grammes |
+| `smm_scorer.py`                       | **Modèle retenu** : semi-Markov à segments, forward-backward     |
+| `run_smm.py`                          | CLI : score un split → JSONL, précision pleine                  |
+| `kgw_scores.py`                       | Masques green KGW (CUDA Philox obligatoire, calculés sur JURECA) |
+| `run_kgw.sh`                          | SLURM : précalcul KGW                                            |
+| `matched_filter.py`                   | *(abandonné)* fenêtres discrètes + `min(g,d)`, remplacé par v2  |
+| `hmm_scorer.py`, `run_hmm.py`         | *(abandonné v1)* HMM token-à-token, gardé en référence          |
+| `build_scores.py`                     | *(abandonné)* fusion z-score                                     |
+| `features.py`, `train_calibrator.py`  | *(abandonné)* régression logistique                               |
 
-**Sorties :** `alexandre/output/submission.jsonl`, `validation_scores.jsonl`, `kgw_*.npz`, logs SLURM dans `alexandre/logs/`.
+**Sorties :** `alexandre/submission_smm_nokgw.jsonl` (soumis, `submission_id=159`), `val_smm_scores.jsonl`, `kgw_*.npz` (sur JURECA).

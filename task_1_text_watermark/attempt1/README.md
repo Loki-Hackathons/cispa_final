@@ -1,6 +1,6 @@
 # Task 1 — Text Watermark Localization (attempt 1)
 
-**Owners:** Alexandre (ansart1), Bastian, Melissa
+**Owners:** Alexandre (ansart1), Melissa (abider1)
 
 Spec: [Task 1 Text Watermark Localization.md](../../docs/Task%201%20Text%20Watermark%20Localization.md)
 
