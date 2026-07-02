@@ -61,3 +61,34 @@ def postprocess(scores: Sequence[float], smooth_radius: int = 3, smooth_sigma: f
     if do_isolated:
         out = penalize_isolated(out, iso_radius, iso_thr, iso_factor)
     return [min(1.0, max(0.0, v)) for v in out]
+
+
+def moving_average(scores: Sequence[float], window: int) -> list[float]:
+    """Centered moving-average smoothing (contiguous spans reinforce each other).
+
+    This is the smoothing that Alexandre's proven calibrator used; a monotone-ish
+    low-pass that markedly helps the pooled TPR @ 0.1 % FPR by suppressing isolated
+    high-scoring clean tokens. ``window <= 1`` is a no-op.
+    """
+    n = len(scores)
+    if n == 0 or window <= 1:
+        return [min(1.0, max(0.0, float(v))) for v in scores]
+    w = min(window, n)
+    kernel = [1.0 / w] * w
+    half = w // 2
+    out = [0.0] * n
+    for i in range(n):
+        acc = 0.0
+        wsum = 0.0
+        for j in range(w):
+            idx = i + (j - half)
+            if 0 <= idx < n:
+                acc += kernel[j] * scores[idx]
+                wsum += kernel[j]
+        out[i] = acc / wsum if wsum > 0 else scores[i]
+    return [min(1.0, max(0.0, v)) for v in out]
+
+
+def apply_smoothing(scores: Sequence[float], window: int) -> list[float]:
+    """Apply the moving-average smoothing selected on validation (window==1 → clip only)."""
+    return moving_average(scores, window)

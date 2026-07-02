@@ -1,0 +1,30 @@
+SprintML/MGI — dataset image metrics
+================================================
+Source: Hugging Face datasets (SprintML/MGI, split=train)
+Samples analyzed: 50
+
+Dimensions
+  Height x Width x Channels: 375 x 500 x 3
+  Unique shapes in sample: [(220, 220, 3), (240, 206, 3), (240, 320, 3), (256, 256, 3), (288, 322, 3), (290, 500, 3), (333, 500, 3), (334, 500, 3), (335, 500, 3), (336, 448, 3), (342, 500, 3), (345, 500, 3), (375, 500, 3), (379, 535, 3), (387, 500, 3), (432, 500, 3), (436, 500, 3), (500, 333, 3), (500, 374, 3), (500, 375, 3), (500, 446, 3), (500, 500, 3), (1954, 2613, 3)]
+  Color mode: RGB (3 channels)
+
+Pixel value range
+  Dtype(s): uint8
+  Global min / max: 0.000000 / 255.000000
+  Integer-like storage: True
+  Interpretation: [0, 255] uint8 integers
+
+Per-channel statistics (sample mean of per-image stats)
+  Mean (R,G,B): [122.282, 115.7453, 100.5495]
+  Std  (R,G,B): [59.0045, 56.992, 54.2207]
+
+Normalization assessment
+  - Channel means in mid-range — typical of raw RGB in [0,255] without normalization.
+
+Task submission constraint (from spec)
+  Submit modified images as 256 x 256 x 3 (npz, float32 in [0,1] typical for torch).
+
+Class layout in reference filenames
+  img_000..299: M (member)
+  img_300..599: N (non-member)
+  img_600..899: G (generated)

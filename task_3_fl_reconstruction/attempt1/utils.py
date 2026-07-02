@@ -20,13 +20,27 @@ import config
 # --------------------------------------------------------------------------- #
 def load_gradient(i: int) -> dict:
     """Load gradients/model{i}.pt -> dict with keys gradients/family/... ."""
+    config.ensure_data_root()
     path = os.path.join(config.GRADIENTS_DIR, f"model{i}.pt")
+    if not os.path.isfile(path):
+        raise FileNotFoundError(
+            f"Missing gradient file: {path}\n"
+            f"  TASK3_DATA_ROOT={config.DATA_ROOT}\n"
+            "Run: source setup_cluster.sh"
+        )
     return torch.load(path, weights_only=False, map_location="cpu")
 
 
 def load_state(i: int) -> dict:
     """Load models/model{i}.pt -> plain state_dict."""
+    config.ensure_data_root()
     path = os.path.join(config.MODELS_DIR, f"model{i}.pt")
+    if not os.path.isfile(path):
+        raise FileNotFoundError(
+            f"Missing model file: {path}\n"
+            f"  TASK3_DATA_ROOT={config.DATA_ROOT}\n"
+            "Run: source setup_cluster.sh"
+        )
     return torch.load(path, weights_only=False, map_location="cpu")
 
 

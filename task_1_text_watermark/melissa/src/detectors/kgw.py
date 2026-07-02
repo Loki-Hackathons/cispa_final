@@ -63,9 +63,31 @@ def _greenset_cpu(seed: int, vocab: int, green_size: int) -> set:
     return set(perm[:green_size].tolist())
 
 
+def _greenlist(seed: int, vocab: int, green_size: int, device) -> "object":
+    """Green token ids as a tensor on ``device`` (no host transfer).
+
+    Same permutation as the ``_greenset_*`` helpers — we keep the ids on the GPU so
+    membership can be tested with a GPU reduction instead of building a Python ``set``
+    and transferring 38k ids to the host per context.
+    """
+    import torch
+
+    gen = torch.Generator(device=device)
+    gen.manual_seed(seed)
+    perm = torch.randperm(vocab, generator=gen, device=device)
+    return perm[:green_size]
+
+
 def kgw_features(token_ids: Sequence[int], cfg: WatermarkConfig,
                  window: int = 25) -> tuple[list[float], list[float], list[float]]:
-    """Return (green 0/1, local green fraction, running z-score) per token."""
+    """Return (green 0/1, local green fraction, running z-score) per token.
+
+    The greenlist membership test runs entirely on the GPU: for each token we do
+    ``(greenlist == target).any()`` on-device and only copy the final ``green`` vector
+    back to the host once per document. This is numerically identical to the previous
+    Python-``set`` implementation (same permutation, same green size) but keeps the
+    38k-element work on the GPU instead of the CPU.
+    """
     try:
         import torch
     except Exception:  # noqa: BLE001 - torch unavailable locally
@@ -85,15 +107,19 @@ def kgw_features(token_ids: Sequence[int], cfg: WatermarkConfig,
               "(Philox). Run on a GPU for correct KGW features.")
 
     n = len(token_ids)
-    green = [0.0] * n
-    cache: dict[int, set] = {}
+    toks = torch.as_tensor([int(t) for t in token_ids], device=device)
+    green_t = torch.zeros(n, device=device)
+    cache: dict[int, "object"] = {}  # seed -> greenlist id tensor on device
     for t in range(k, n):
         context = tuple(token_ids[t - k:t])
         seed = _seed_for_context(context, key)
-        if seed not in cache:
-            cache[seed] = (_greenset_cuda(seed, vocab, green_size, device) if use_cuda
-                           else _greenset_cpu(seed, vocab, green_size))
-        green[t] = 1.0 if int(token_ids[t]) in cache[seed] else 0.0
+        gl = cache.get(seed)
+        if gl is None:
+            gl = _greenlist(seed, vocab, green_size, device)
+            cache[seed] = gl
+        # Membership stays on-device; assigning a 0-dim bool tensor avoids a host sync.
+        green_t[t] = (gl == toks[t]).any().to(green_t.dtype)
+    green = green_t.detach().cpu().tolist()  # single GPU->host transfer per document
 
     # Local green fraction.
     frac = [0.0] * n
