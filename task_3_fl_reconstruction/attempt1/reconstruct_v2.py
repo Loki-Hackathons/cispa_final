@@ -74,18 +74,19 @@ def recover_mlp(i: int, info: extract.ModelInfo):
         return separation.diversify_fill(torch.empty(0, *config.IMG_SHAPE),
                                          config.BATCH), "empty"
 
-    own_active = None
-    if info.activation == "relu":
-        state = utils.load_state(i)
-        W0 = state["net.0.weight"][valid]
-        b0 = state["net.0.bias"][valid]
-        own_active = ((W0 * rows).sum(dim=1) + b0) > 0
+    # Own-margin (w_i.r_i+b_i)/||w_i|| from the KNOWN weights ranks likely
+    # single-image rows first — the best label-free selector in bench_selection.
+    state = utils.load_state(i)
+    W0 = state["net.0.weight"][valid]
+    b0 = state["net.0.bias"][valid]
+    margin = separation.own_margin(rows, W0, b0)
+    own_active = margin > 0
 
     imgs, conf = separation.isolated_recovery(
         rows, config.IMG_SHAPE, _mlp_to_rgb(info.activation),
-        sim_threshold=0.90, own_active=own_active,
+        sim_threshold=0.90, own_active=own_active, row_priority=margin,
     )
-    method = f"cluster({info.activation}):{imgs.shape[0]}"
+    method = f"cluster+margin({info.activation}):{imgs.shape[0]}"
     out = separation.diversify_fill(imgs, config.BATCH)
     return out, method
 
@@ -111,13 +112,18 @@ def recover_cnn(i: int, info: extract.ModelInfo):
                                              config.BATCH), "reshape-fail"
 
     to_rgb = _cnn_to_rgb(i, (fc, fh, fw))
-    imgs, conf = separation.isolated_recovery(
-        rows, (fc, fh, fw), to_rgb, sim_threshold=0.90,
-    )
     st = utils.load_state(i)
+    # fc1 own-margin: feed each recovered fc1-input row back through the KNOWN
+    # fc1 weights; isolated rows reactivate their neuron strongly.
+    fcW = st["fc1.weight"][valid]
+    fcb = st["fc1.bias"][valid]
+    margin = separation.own_margin(rows, fcW, fcb)
+    imgs, conf = separation.isolated_recovery(
+        rows, (fc, fh, fw), to_rgb, sim_threshold=0.90, row_priority=margin,
+    )
     tm = channels.analyze_conv(st["conv.weight"], st.get("conv.bias"))
     tag = "transmit" if tm.is_transmit() else "avg"
-    method = f"cluster/{tag}({info.activation}):{imgs.shape[0]}"
+    method = f"cluster+margin/{tag}({info.activation}):{imgs.shape[0]}"
 
     out = separation.diversify_fill(imgs, config.BATCH)
     return out, method
@@ -175,14 +181,12 @@ def diagnose(models: list[int], outdir: str, n_preview: int = 64) -> None:
             if info.family == "mlp":
                 gW, gb = gr["net.0.weight"], gr["net.0.bias"]
                 rows, valid = separation.analytic_rows(gW, gb)
-                own = None
-                if info.activation == "relu":
-                    st = utils.load_state(i)
-                    W0, b0 = st["net.0.weight"][valid], st["net.0.bias"][valid]
-                    own = ((W0 * rows).sum(dim=1) + b0) > 0
+                st = utils.load_state(i)
+                W0, b0 = st["net.0.weight"][valid], st["net.0.bias"][valid]
+                margin = separation.own_margin(rows, W0, b0)
                 imgs, conf = separation.isolated_recovery(
                     rows, config.IMG_SHAPE, _mlp_to_rgb(info.activation),
-                    own_active=own)
+                    row_priority=margin)
             elif info.family == "cnn" and "fc1.weight" in gr:
                 gW, gb = gr["fc1.weight"], gr["fc1.bias"]
                 rows, valid = separation.analytic_rows(gW, gb)
@@ -190,9 +194,12 @@ def diagnose(models: list[int], outdir: str, n_preview: int = 64) -> None:
                 if fc * fh * fw != rows.shape[1]:
                     fc = gr["conv.weight"].shape[0]
                     fh, fw = utils.infer_square(rows.shape[1], fc)
-                imgs, conf = separation.isolated_recovery(
-                    rows, (fc, fh, fw), _cnn_to_rgb(i, (fc, fh, fw)))
                 st = utils.load_state(i)
+                margin = separation.own_margin(
+                    rows, st["fc1.weight"][valid], st["fc1.bias"][valid])
+                imgs, conf = separation.isolated_recovery(
+                    rows, (fc, fh, fw), _cnn_to_rgb(i, (fc, fh, fw)),
+                    row_priority=margin)
                 tm = channels.analyze_conv(st["conv.weight"], st.get("conv.bias"))
                 transmit = f"{tm.strength:.2f}{'*' if tm.is_transmit() else ''}"
             else:

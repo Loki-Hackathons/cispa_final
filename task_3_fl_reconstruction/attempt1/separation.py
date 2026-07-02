@@ -67,6 +67,21 @@ def _greedy_cluster(fp: torch.Tensor, sim_threshold: float) -> list[list[int]]:
     return members
 
 
+def own_margin(rows: torch.Tensor, W: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """Normalised self-activation margin  (w_i . r_i + b_i) / ||w_i||.
+
+    For a truly isolated neuron, its analytic row r_i IS the single image that
+    fired it, so feeding r_i back through the KNOWN weights reactivates that
+    neuron strongly (large positive margin).  Mixture / spurious rows give small
+    or negative margins.  This is the single best label-free 'is this a real
+    single-image row' signal in our synthetic benchmark (bench_selection.py):
+    +0.09 matched-SSIM over the old quality score in the heavy-mixture regime,
+    and it uses only known weights -> no leaderboard, no overfit risk.
+    """
+    m = (W * rows).sum(dim=1) + b
+    return m / W.norm(dim=1).clamp_min(1e-8)
+
+
 @torch.no_grad()
 def isolated_recovery(
     rows: torch.Tensor,
@@ -74,6 +89,7 @@ def isolated_recovery(
     to_rgb,
     sim_threshold: float = 0.90,
     own_active: torch.Tensor | None = None,
+    row_priority: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Cluster analytic rows into single-image reconstructions.
 
@@ -82,9 +98,10 @@ def isolated_recovery(
       feature_shape: (C, H, W) to reshape rows before rgb mapping.
       to_rgb: callable(rows_subset) -> (M,3,64,64) in [0,1]  (family-specific).
       sim_threshold: cosine cut for merging rows into one image cluster.
-      own_active: optional (N,) bool/float, True if the row's own neuron is
-        active on its reconstruction (a ReLU 'this is real' signal). Boosts
-        confidence when present.
+      own_active: optional (N,) bool/float ReLU 'this is real' signal.
+      row_priority: optional (N,) score (e.g. own_margin). When given it is the
+        PRIMARY ranking (seed order + cluster confidence), which the synthetic
+        benchmark shows beats norm/quality ranking on mixture-heavy models.
 
     Returns (images, confidence): images (K,3,64,64) one per cluster, sorted by
     descending confidence; confidence (K,) in ~[0,1].
@@ -97,12 +114,17 @@ def isolated_recovery(
     imgs = to_rgb(rows)                                  # (N,3,64,64) in [0,1]
     fp = utils._fingerprints(imgs)                       # (N,d) unit vectors
 
-    # Seed strongest rows first (larger ||x|| == more energetic reconstruction).
-    row_norm = rows.reshape(n, -1).norm(dim=1)
-    order = torch.argsort(row_norm, descending=True)
+    # Seed order: prefer high own-margin rows (likely isolated) when available,
+    # else the most energetic reconstructions.
+    if row_priority is not None:
+        order = torch.argsort(row_priority, descending=True)
+        prio_n = (row_priority - row_priority.min()) / (
+            row_priority.max() - row_priority.min() + 1e-8)
+    else:
+        order = torch.argsort(rows.reshape(n, -1).norm(dim=1), descending=True)
+        prio_n = None
     fp_ord = fp[order]
     clusters_ord = _greedy_cluster(fp_ord, sim_threshold)
-    # Map back to original indices.
     clusters = [[int(order[j]) for j in cl] for cl in clusters_ord]
 
     reps: list[torch.Tensor] = []
@@ -114,22 +136,23 @@ def isolated_recovery(
         members = torch.tensor(cl, dtype=torch.long)
         # Denoise: average the cluster's rgb reconstructions (identical for a
         # perfectly isolated image; averages out measurement noise otherwise).
-        rep = imgs[members].mean(dim=0, keepdim=True)
-        reps.append(rep)
+        reps.append(imgs[members].mean(dim=0, keepdim=True))
 
         size = len(cl)
-        # Intra-cluster tightness (mean cosine of members to their centroid).
         if size > 1:
             cen = F.normalize(fp[members].mean(dim=0), dim=0)
             tight = float((fp[members] @ cen).clamp(-1, 1).mean())
         else:
-            tight = 0.5                                  # unknown for singletons
-        size_score = min(1.0, size / 8.0)                # saturates by 8 rows
+            tight = 0.5
+        size_score = min(1.0, size / 8.0)
         q = float(qn[members].mean())
-        act = 1.0
-        if own_active is not None:
-            act = float(own_active[members].float().mean())
-        conf = 0.4 * size_score + 0.25 * tight + 0.2 * q + 0.15 * act
+        if prio_n is not None:
+            # Own-margin dominates; size/tightness/quality are light tiebreaks.
+            p = float(prio_n[members].max())
+            conf = 0.7 * p + 0.15 * size_score + 0.1 * tight + 0.05 * q
+        else:
+            act = float(own_active[members].float().mean()) if own_active is not None else 1.0
+            conf = 0.4 * size_score + 0.25 * tight + 0.2 * q + 0.15 * act
         confs.append(conf)
 
     images = torch.cat(reps, dim=0)

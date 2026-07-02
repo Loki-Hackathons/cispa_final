@@ -473,6 +473,9 @@ CPU, seconds per model, no leaderboard needed to validate.
 | `separation.py` | **Isolated-image recovery by clustering** the analytic rows. Rows that reconstruct the *same* private image are near-identical (single-image neurons); mixture rows are lone outliers. Tight/populous clusters = high-confidence reconstructions, averaged to denoise. Also `effective_rank()` to tell ReLU-leaky from smooth-dense models. `diversify_fill()` fills leftover slots with augmented variants of real reconstructions (beats white noise ≈ 0 SSIM). |
 | `reconstruct_v2.py` | Orchestrates per family + `--diagnose` mode (recoverability table + preview PNGs). MLP-ReLU rows are **clamped** (true [0,1] scale) instead of min/max-stretched → better SSIM luminance term. |
 | `selftest_v2.py` | Synthetic trap-weight MLP+CNN end-to-end check. Passes at MLP 1.00 / CNN 0.99 nearest-match SSIM. |
+| `bench_selection.py` | Objectively compares row-**selection** strategies on synthetic trap gradients with known ground truth. Showed **own-margin** ranking `(w_i·r_i+b_i)/‖w_i‖` beats the old quality score by ~+0.05–0.09 matched-SSIM on mixture-heavy models. Now the primary selector in `separation.isolated_recovery`. Never touches the leaderboard → no overfit risk. |
+
+**Why own-margin:** feeding a recovered analytic row back through the KNOWN first-layer weights reactivates its neuron strongly only when the row is a genuine single-image reconstruction; mixtures give weak/negative margins. It's the best label-free "is this real" signal we found, and the benchmark shows large headroom still exists (oracle ~0.53 vs current selectors ~0.35 on heavy-mixture models) — i.e. selection, not optimisation, is the main lever.
 
 **Step 0 — environment (copy-paste exactly; never use `...` paths from chat):**
 
