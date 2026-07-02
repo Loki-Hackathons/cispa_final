@@ -27,7 +27,9 @@
 | Diagnostic shift CV→public + robustesse prior | ✅ fait — pas de shift de longueurs, prior fitté conservé (§12) |
 | Entropy (LLR conditionnés, proxy Qwen 0.5B) | ✅ fait et soumis — CV 0.3685, public 0.328 (§16) |
 | **Entropie 7B exacte + lissage isotonic** | ✅ fait et soumis — **CV 0.4301** (+16.7 % rel. vs proxy 0.5B), public **0.349** (§18) |
-| Vraisemblance exacte Gumbel-Max/TextSeal (`logp_target`, 7B) | ❌ **testé, négatif** — CV chute de 0.35→0.28 (§18) |
+| Vraisemblance exacte Gumbel-Max/TextSeal (`logp_target`, 7B) | ❌ **testé, négatif** — CV chute de 0.35→0.28, y compris à poids de mixture réduit (§18, §19.3) |
+| KGW/Unigram exact (`kgw_lpg`/`unigram_lpg`, 7B) | ❌ **testé, négatif** — bug de référence H0 trouvé + corrigé (§19.2), mais résultat final toujours sous la baseline |
+| Recherche bibliographique (WISER, GCD/AOL ACL2025, TextSeal `localized_detect`) | ✅ fait — aucun algorithme publié supérieur au SMM pour ce cadre (longueurs canoniques connues) (§19.1) |
 
 **Meilleur score leaderboard public : 0.349** (LLR conditionnés par entropie 7B exacte + lissage isotonic). Le gros du gain vient (1) du passage HMM → semi-Markov à longueurs discrètes + fix du bug n-grammes répétés, (2) du remplacement des émissions gaussiennes à shifts fixes par des LLR empiriques binnés + priors fittés, sélectionnés en CV 5-fold, (3) du conditionnement des LLR par bin d'entropie prédictive du LM, (4) du passage de l'entropie proxy (Qwen 0.5B) à l'entropie exacte du générateur (Qwen 7B, §18) — le plus gros gain isolé mesuré à ce jour (+16.7 % CV). KGW (+1.4 % relatif) et Unigram (+0.4 % relatif) ajoutent chacun un gain modeste mais net.
 
@@ -532,3 +534,68 @@ Testé en ajoutant les émissions `gumbel_exact`/`textseal_exact` (LLR fermé su
 `cv_smm.py --final b50_ps2_elo_entbin5_iso` (entropie 7B + isotonic, **sans** vraisemblance exacte) → **#994, public 0.349** (+6,3 % rel. vs #771). Gain public plus modeste que le gain CV (+16,7 %) — cohérent avec le pattern déjà documenté (§10, §16) où les gains CV ne transfèrent jamais à 100 % au public, sans que ce soit un signal de sur-ajustement (ratio public/CV reste dans la fourchette observée historiquement).
 
 **Format vérifié avant soumission :** 1320/1320 docs, scores ∈ [0.446, 0.569] (plage resserrée autour de 0.5, cohérente avec les soumissions précédentes).
+
+---
+
+## 19. Recherche externe + fermeture de la piste "vraisemblance exacte" pour KGW/Unigram (négatif, bug trouvé et corrigé)
+
+Suite à la demande d'analyser en profondeur l'écart avec la tête du leaderboard (public 0.32 alors vs meilleure équipe 0.46) : audit complet de ce document, recherche de publications sur la localisation de watermark en texte mixte, et fermeture de la piste `kgw_lpg`/`unigram_lpg` laissée ouverte en §18 ("pas encore câblée dans le scorer").
+
+### 19.1 Recherche bibliographique — aucun algorithme publié supérieur trouvé pour ce cadre
+
+Recherche ciblée sur la localisation de watermark en texte mixte (au-delà des 4 papiers déjà assignés) :
+
+| Source | Apport |
+| ------ | ------ |
+| Code officiel TextSeal (`vendor/textseal/textseal/watermarking/detector.py::localized_detect`) | Référence organisateurs : *geometric cover search* (scan statistique dyadique) + *boundary smoother* (moyenne mobile seuillée) → labels binaires, pas de score continu par token. Confirme que notre dédup `(contexte+token)` est **identique** à leur `dedup_key` (pas de bug de dédup). |
+| Zhao et al., "Efficiently Identifying Watermarked Segments in Mixed-Source Texts", ACL 2025 (GCD + AOL/Aligator) | Algorithme de référence académique le plus proche de notre tâche (KGW/Unigram/Gumbel mixés). AOL = lissage en ligne adaptatif multi-échelle (pas de longueurs canoniques supposées). **Notre SMM est structurellement plus fort dans notre cadre** car on connaît les longueurs de spans quasi-discrètes (information que ni GCD/AOL ni WISER n'exploitent) — marginaliser exactement sur ces longueurs via forward-backward domine un lissage non-paramétrique générique. |
+| Karmakar et al., "WISER" (epidemic change-points) | Même constat : détection de segments sans prior de longueur. Pertinent si on perdait la structure de longueurs canoniques (pas notre cas). |
+| `WatermarkBase._get_greenlist_ids` (vendor `lm-watermarking`) | Vérifié `select_green_tokens=True` (valeur YAML) ⇒ `greenlist = perm[:greenlist_size]` — **exactement** ce que `kgw_scores.py` et `entropy_pass.py` implémentent déjà. Pas de bug de ce côté. |
+
+**Conclusion : l'écart au leaderboard n'est probablement pas dû à un algorithme de localisation publié qu'on aurait manqué** — notre approche SMM (posterior exact, prior de longueur fitté) est déjà plus adaptée à ce cadre précis que les méthodes de la littérature généraliste. L'écart vient plus vraisemblablement de la précision de calibration des signaux bruts (cf. 19.2) et/ou de données d'entraînement supplémentaires (piste synthétique, en cours par l'agent parallèle).
+
+### 19.2 KGW/Unigram "vraisemblance exacte" via `kgw_lpg`/`unigram_lpg` : bug trouvé + corrigé, résultat final négatif
+
+Le pass GPU 7B (§18) calcule aussi `kgw_lpg`/`unigram_lpg` = log P(vert | contexte) sous la distribution **boostée** (delta/strength appliqué avant softmax), mais ces signaux n'étaient pas encore câblés dans `smm_scorer.py`. Motivation : le Bernoulli global KGW plafonne à 9 % de spans détectés (§17) — un LLR fermé par position, comme pour Gumbel/TextSeal, pourrait faire beaucoup mieux sans aucun fit.
+
+**Câblage initial (naïf) : effondrement catastrophique.** Première implémentation : `LLR = log(p_vert_boosté / gamma)` si vert réalisé, `log((1-p_vert_boosté)/(1-gamma))` si rouge — référence H0 = constante `gamma` (comme pour le Bernoulli fitté). Résultat : **CV s'effondre à 0.002–0.024** (vs 0.4301 baseline). Diagnostic (`corrcoef` sur les pools H0/H1 labellisés) : `corr(bit vert réalisé, p_vert_boosté) = 0.69 sur les tokens CLEAN (label=0)`, alors qu'elle devrait être nulle si `gamma` était la bonne référence. **Cause : aux positions où le modèle est déjà confiant (faible entropie) et où son token dominant naturel est vert, `p_vert_boosté` est proche de 1 — boosté ou non — donc même un token clean (jamais boosté) y est très souvent vert. Utiliser `gamma` comme H0 crédite à tort ces positions confiantes comme preuve de watermark, indépendamment de la présence réelle d'un watermark.**
+
+**Correction :** inverser la transformation boost pour retrouver la probabilité **non-boostée** `g0` à cette position (`g0 = p_boosté / (p_boosté + (1-p_boosté)·e^boost)`, dérivé de la définition KGW `p_boosté = g0·e^δ / (g0·e^δ + (1-g0))`), puis comparer boosté vs non-boosté à la **même** position :
+`LLR = log(p_boosté/g0)` si vert, `log((1-p_boosté)/(1-g0))` si rouge. Vérifié empiriquement : `mean(g0) = 0.2507` sur les tokens H0 (récupère bien gamma en moyenne, confirmant la formule), et le LLR corrigé est borné (p99 ≈ 1.26, pas d'explosion).
+
+**Résultat final (LLR corrigé, CV 5-fold) :**
+
+| Config | CV TPR@0.1%FPR |
+| ------ | -------------- |
+| `b50_ps2_elo_entbin5_iso` (référence, Bernoulli fitté) | **0.4301** |
+| + KGW exact (LLR corrigé, remplace le Bernoulli KGW) | 0.4031 |
+| + Unigram exact (LLR corrigé, remplace le Bernoulli Unigram) | 0.4243 |
+| + KGW exact + Unigram exact | 0.3994 |
+
+**Verdict : négatif dans les trois variantes, même après correction du bug.** Le Bernoulli fitté par bin d'entropie (§16) capture déjà, de façon empirique et robuste, l'essentiel du signal exploitable ; le détecteur fermé par position — plus bruité (inversion numérique instable près de p→0/1, `KGW_VOCAB_SIZE` et `delta` pinnés mais non re-vérifiés à cette précision) — n'apporte pas de gain net. **Non retenu.**
+
+### 19.3 Vraisemblance exacte Gumbel-Max/TextSeal : confirmation que la dilution n'est pas qu'un effet de poids uniforme
+
+Complément à la piste négative de §18.2 : test d'un poids de mixture réduit (`SmmParams.mix_log_weights`, mécanisme de §17.C) sur les hypothèses `gumbel_exact`/`textseal_exact` plutôt que le poids uniforme `1/n_hyp` déjà écarté.
+
+| Poids exact (vs 1.0 pour les autres hypothèses) | CV TPR@0.1%FPR |
+| ------------------------------------------------ | -------------- |
+| 1.0 (uniforme, déjà testé §18.2) | 0.3573 |
+| 0.3 | 0.3731 |
+| 0.1 | 0.3849 |
+| 0.03 | 0.3986 |
+| 0 (= référence sans exact) | **0.4301** |
+
+**Confirme que ce n'est pas un problème de poids de mixture** : même à poids quasi nul (0.03), le signal exact dégrade encore le CV de 3 points. Le diagnostic de §18.2 (mismatch température/top-p à la génération, cassant l'hypothèse `r|H0 ~ Uniform(0,1)`) est la bonne explication — aucun poids de mixture ne peut compenser un LLR structurellement biaisé. **Confirme la recommandation de §18.2 : ne pas réinvestir sur cette piste sans calibration température/top-p au préalable** (ex. fit par MLE sur les spans H1 labellisés, déjà évoqué comme piste par l'agent parallèle).
+
+### 19.4 Conclusion et pistes restantes par ROI
+
+Toutes les pistes testées dans cette section (exact KGW, exact Unigram, poids réduit sur exact Gumbel/TextSeal) sont **négatives et documentées pour éviter qu'elles soient retestées sans nouvelle information**. Le meilleur pipeline reste `b50_ps2_elo_entbin5_iso` (CV 0.4301, public 0.349, soumission #994).
+
+Pistes restantes non explorées ici, par ROI décroissant :
+
+1. **Calibration température/top-p du détecteur exact** (agent parallèle) — seul chemin identifié pour débloquer la vraisemblance exacte Gumbel/TextSeal ; gain potentiel important vu l'écart CV actuel (0.35 vs 0.43 sans elle) suggère qu'une fois calibrée, elle pourrait dépasser le binned+entropie pur.
+2. **Données synthétiques massives** (agent parallèle, en cours) — seul levier qui adresse structurellement les 34 % de spans courts sans signal exploitable (§17) et permettrait de vérifier/calibrer les hypothèses de température/top-p par maximum de vraisemblance sur des milliers de spans au lieu de ~180 documents.
+3. **Vérification indépendante de `KGW_VOCAB_SIZE=151665` et `delta=1.5`** au-delà du probe déjà fait (§8) — le fait que le signal KGW réalisé (H1 green rate ≈ 0.30 contre H0 ≈ 0.25, effet faible) reste stable après toutes nos corrections suggère soit un effet réellement faible, soit un paramètre encore imprécis ; non vérifiable sans nouvelle preuve externe (au-delà du scope de cette session).
+
+**Fichiers modifiés :** `smm_scorer.py` (`green_exact_llr`, kinds `kgw_exact`/`unigram_exact`, `Emission.boost`), `fit_smm.py` (`use_exact_kgw`, `use_exact_unigram`, `exact_mix_weight`), `cv_smm.py` (`load_lpg`, configs `*_kgwx`/`*_unix`/`*_bothx`/`*_allx`/`*_exw*`).
