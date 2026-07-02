@@ -338,6 +338,48 @@ Interactive debug:
 salloc -p dc-gpu-devel -t 30 -N 1 -A training2625 --gres=gpu:1
 ```
 
+### 10.1 Parallel per-model workflow (recommended under GPU congestion)
+
+The optimization now covers **all three families** (MLP, CNN, ViT) and, per
+model, keeps whichever of {analytic, optimized} reproduces the **observed
+gradient** best (`run.py` prints `[select] ...`). This selection uses the real
+leaked gradient, never the leaderboard, so it cannot cause public-split
+overfitting.
+
+To grab GPU slots as they free (backfill), submit **one array task per model**:
+
+```bash
+cd /p/scratch/training2625/dougnon1/Loki/cispa_final/task_3_fl_reconstruction/attempt1
+mkdir -p output/parts
+
+sbatch slurm_array.sh          # 12 independent tasks -> output/parts/model{i}.pt
+# throttle concurrency if needed: sbatch --array=1-12%4 slurm_array.sh
+
+squeue -u $USER                # watch tasks trickle through as GPUs free
+```
+
+Each task writes `output/parts/model{i}.pt`. Assemble + submit **incrementally**
+on the login node as parts land (no GPU needed, instant):
+
+```bash
+python merge.py --parts output/parts --base submission.pt --out submission.pt
+python submit.py --check submission.pt      # local validate + quality report
+
+cp submission.pt $TASK3_DATA_ROOT/submission.pt
+cd $TASK3_DATA_ROOT && python task_template.py   # SUBMIT=True (5-min cooldown)
+```
+
+**Before trusting ViT (9, 11):** confirm the architecture matches the rebuilt
+forward (timm naming). The builder fast-fails on mismatch and keeps noise, so a
+wrong guess never wastes a slot — but you can verify keys first:
+
+```bash
+python inspect_models.py --keys 9 11
+```
+
+**Steps:** MLP/CNN use 4000, ViT 6000 (set in `slurm_array.sh`). These are
+principled Geiping defaults; do **not** tune them against leaderboard feedback.
+
 ---
 
 ## 11. Pitfalls
@@ -364,11 +406,13 @@ attempt1/
 ├── config.py           # paths, constants (TASK3_DATA_ROOT overridable)
 ├── utils.py            # IO, validate, image mapping, quality score, dedup
 ├── extract.py          # introspect + analytic extraction (eq. 6), MLP & CNN
-├── rebuild.py          # MLP rebuild, iDLG labels, gradient re-sim, Geiping opt
-├── run.py              # orchestrate 12 models → submission.pt
+├── rebuild.py          # MLP/CNN/ViT rebuild, iDLG labels, gradient re-sim, Geiping opt
+├── run.py              # orchestrate models → submission.pt (or per-model parts)
+├── merge.py            # assemble submission.pt from output/parts (array jobs)
 ├── submit.py           # strict validator + upload wiring (reads .env)
-├── inspect_models.py   # shape table + analytic preview grids (run first!)
-└── slurm_run.sh        # GPU job for --optimize on hard models
+├── inspect_models.py   # shape table, --keys full dump, analytic preview grids
+├── slurm_run.sh        # GPU job: analytic + optimize MLP into submission.pt
+└── slurm_array.sh      # GPU array (1 task/model) -> output/parts (backfill)
 ```
 
 Data stays in scratch; code reads `TASK3_DATA_ROOT` (defaults to the team path).
