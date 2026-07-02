@@ -1,0 +1,10 @@
+# Text Watermark Localization — Python deps
+# Install on JURECA:  pip install -r melissa/requirements.txt
+datasets>=2.18
+numpy>=1.24
+scikit-learn>=1.3
+pyyaml>=6.0
+# For real detector scores / entropy proxy / KGW CUDA Philox (cluster GPU):
+torch>=2.1
+transformers>=4.40
+requests>=2.31
