@@ -6,7 +6,7 @@
 
 ---
 
-## État actuel (2026-07-02, soir)
+## État actuel (2026-07-02, nuit)
 
 | Élément | Statut |
 | -------- | ------ |
@@ -17,15 +17,21 @@
 | Soumission #159 (semi-Markov, sans KGW) | score public **0.2001** — ×28 vs #101 |
 | Soumission #262 (semi-Markov + KGW) | score public **0.2029** |
 | Soumission #408 (semi-Markov + KGW + Unigram) | score public **0.2037** |
-| **Soumission #509 (CV-binned : SMM + LLR empiriques + priors fittés)** | **score public 0.2526** — **best actuel** (+24 % rel. vs #408) |
+| Soumission #509 (CV-binned : SMM + LLR empiriques + priors fittés) | score public **0.2526** (+24 % rel. vs #408) |
+| Soumission #771 (LLR conditionnés par entropie, proxy 0.5B) | score public **0.328** (+30 % rel. vs #509) |
+| **Soumission #994 (idem + entropie 7B exacte + lissage isotonic)** | **score public 0.349** — **best actuel** (+6.3 % rel. vs #771) |
 | Val TPR@0.1%FPR — semi-Markov v2 (+ KGW + Unigram) | **0.3137** (neutre vs +KGW seul) |
 | KGW | ✅ intégré via `.npz` précalculés (CUDA Philox, JURECA) |
 | Unigram | ✅ intégré (`perm@152064`, éligibilité `id < 151643`) — gain marginal, plafond atteint (§9) |
-| CV 5-fold + LLR binned (`cv_smm.py`, `fit_smm.py`) | ✅ fait et soumis — CV 0.3484 vs 0.2764 baseline, public **0.2526** (§11) |
+| CV 5-fold + LLR binned (`cv_smm.py`, `fit_smm.py`) | ✅ fait et soumis — CV 0.3484, public 0.2526 (§11) |
+| Diagnostic shift CV→public + robustesse prior | ✅ fait — pas de shift de longueurs, prior fitté conservé (§12) |
+| Entropy (LLR conditionnés, proxy Qwen 0.5B) | ✅ fait et soumis — CV 0.3685, public 0.328 (§16) |
+| **Entropie 7B exacte + lissage isotonic** | ✅ fait et soumis — **CV 0.4301** (+16.7 % rel. vs proxy 0.5B), public **0.349** (§18) |
+| Vraisemblance exacte Gumbel-Max/TextSeal (`logp_target`, 7B) | ❌ **testé, négatif** — CV chute de 0.35→0.28 (§18) |
 
-**Meilleur score leaderboard public : 0.2526** (CV-binned). Le gros du gain vient (1) du passage HMM → semi-Markov à longueurs discrètes + fix du bug n-grammes répétés, (2) du remplacement des émissions gaussiennes à shifts fixes par des LLR empiriques binnés + priors fittés, sélectionnés en CV 5-fold. KGW (+1.4 % relatif) et Unigram (+0.4 % relatif) ajoutent chacun un gain modeste mais net.
+**Meilleur score leaderboard public : 0.349** (LLR conditionnés par entropie 7B exacte + lissage isotonic). Le gros du gain vient (1) du passage HMM → semi-Markov à longueurs discrètes + fix du bug n-grammes répétés, (2) du remplacement des émissions gaussiennes à shifts fixes par des LLR empiriques binnés + priors fittés, sélectionnés en CV 5-fold, (3) du conditionnement des LLR par bin d'entropie prédictive du LM, (4) du passage de l'entropie proxy (Qwen 0.5B) à l'entropie exacte du générateur (Qwen 7B, §18) — le plus gros gain isolé mesuré à ce jour (+16.7 % CV). KGW (+1.4 % relatif) et Unigram (+0.4 % relatif) ajoutent chacun un gain modeste mais net.
 
-**Pipeline de production actuel :** `run_smm.py` + `--kgw output/kgw_{split}.npz` — Unigram est **toujours actif** dans `smm_scorer.py` (4ᵉ signal). Les shifts gaussiens par schéma sont les defaults du module (reproduisent #408).
+**Pipeline de production actuel :** `cv_smm.py --final b50_ps2_elo_entbin5_iso` (nécessite `output/kgw_*.npz` + `output/entropy_*.npz`, tous deux désormais calculés avec le 7B — voir §18). Le pipeline gaussien `run_smm.py` (reproduit #408) reste disponible en fallback sans fichiers d'entropie.
 
 ---
 
@@ -254,7 +260,7 @@ Avant le CV, l'hypothèse "capturer les spans à signal faible en ajoutant des h
 
 Le gain vient surtout des **émissions binnées** (+0.02) et du **prior de bord abaissé** (+0.02) — les priors fittés seuls n'apportent rien, c'est la combinaison LLR empirique + edge bas qui paie.
 
-**Note Unigram :** la config retenue n'inclut **pas** l'émission Unigram. Testé explicitement (`binned50_edge_lo_ps2_uni`) : rebrancher Unigram dans le pipeline CV-binned fait passer le CV de 0.3484 à 0.3408. Cohérent avec le plafond de signal (§9/§14) : ~1 doc test réellement attribuable, contre un coût FPR diffus sur tous les autres. Le pipeline #408 (gaussien + Unigram) reste reproductible via `run_smm.py`, mais le best actuel (#509) est sans Unigram.
+**Note Unigram :** la config retenue n'inclut **pas** l'émission Unigram. Testé explicitement (`binned50_edge_lo_ps2_uni`) : rebrancher Unigram dans le pipeline CV-binned fait passer le CV de 0.3484 à 0.3408. Cohérent avec le plafond de signal (§9) : ~1 doc test réellement attribuable, contre un coût FPR diffus sur tous les autres. Le pipeline #408 (gaussien + Unigram) reste reproductible via `run_smm.py`, mais le best actuel (#509) est sans Unigram.
 
 ### Soumission
 
@@ -264,29 +270,88 @@ Refit sur les 180 docs, scoring test (`cv_smm.py --final binned50_edge_lo_ps2`),
 
 ---
 
-## 12. Prochaines étapes, par impact attendu
+## 12. Diagnostic du shift CV→public + robustesse du prior de longueur
 
-1. **Pondération par entropie** (forward pass Qwen sur GPU, papier TextSeal) — concentre le signal sur tokens à haute incertitude.
-2. **Couverture géométrique** (`localized_detect` vendor TextSeal) — spans diluées dans docs mixtes.
-3. **Raffiner la grille CV** autour de la config retenue (bins, clip, edge) — rendement décroissant attendu, le levier principal est consommé.
-4. ~~Shifts faibles / priors à la main~~ — **testé, négatif** (§11).
-5. ~~Unigram~~ — **résolu, plafond atteint** (§9).
-6. ~~Hypothèse vocab KGW~~ — **écartée** (§8).
+### Écart CV→public : distribution, pas overfitting
+
+Ratio public/CV **constant** (~73 %) avant et après le tuning CV : baseline 0.2764→0.2029 (73.4 %), winner #509 0.3484→0.2526 (72.5 %). Les gains transfèrent à ~100 % — nos décisions généralisent ; l'écart de *niveau* vient de la distribution du test.
+
+### Diagnostic sans labels (`diagnose_shift.py`)
+
+Comparaison labeled held-out (CV winner, 5-fold) vs test (`submission_smm_cv.jsonl`) :
+
+| Statistique | Labeled | Test |
+| ----------- | ------- | ---- |
+| Quantiles de scores (p50/p90/p99/p99.9) | 0.4960 / 0.5357 / 0.5636 / 0.5794 | 0.4968 / 0.5362 / 0.5642 / 0.5808 |
+| Fraction tokens ≥ τ@0.1%FPR | 0.1635 | 0.1714 |
+| Runs canoniques ±4 (seuil strict) | 27.6 % | 28.1 % |
+| Longueurs non-canoniques dominantes | 36–42, 55–57, 81–89 | 36–42, 53–57, 86–87 |
+| Docs avec ≥ 1 détection | 161/180 | 1205/1320 |
+
+**Verdict : aucune évidence de longueurs de spans inconnues au test** — les histogrammes de run-lengths sont superposés, les longueurs "non-canoniques" sont les mêmes résidus de bordure des deux côtés, et seuls 6 runs test dépassent 324 (max 568, compatible avec deux spans adjacentes fusionnées). L'écart de niveau CV→public n'est **pas actionnable** par le prior de longueur ; il reflète vraisemblablement la difficulté intrinsèque des textes test et le pool clean 15× plus grand.
+
+### Robustesse du prior de longueur (CV 5-fold)
+
+| Config | CV TPR@0.1%FPR |
+| ------ | -------------- |
+| **winner (prior fitté, #509)** | **0.3484** |
+| mélange uniforme m=0.1 | 0.3452 |
+| mélange uniforme m=0.2 | 0.3389 |
+| m=0.1 + plage étendue (20, 401) | 0.3384 |
+| prior uniforme pur | 0.2790 |
+
+Le prior uniforme pur s'effondre (−7 pts) : **le prior fitté porte une vraie information**, ce n'est pas un artefact. Toute assurance uniforme coûte du CV, et le diagnostic ci-dessus ne montre aucun risque test qui la justifierait. **Décision : prior fitté conservé tel quel, pas de soumission A/B** (budget préservé). Implémentation : `fit_length_prior(mix_uniform=, len_range=)` dans `fit_smm.py`, configs `b50_ps2_elo_{mix10,mix20,mix10_ext,unif}` dans `cv_smm.py`.
 
 ---
 
-## 13. Comment exécuter
+## 13. Prochaines étapes, par impact attendu
 
-### Pipeline best actuel (public 0.2526) — CV-binned
+1. ~~Entropies 7B exactes~~ — **fait, gros gain confirmé** : CV 0.3685→0.4301 (§18).
+2. **Couverture géométrique** (`localized_detect` vendor TextSeal) — spans diluées dans docs mixtes. Reste à faire.
+3. **Raffiner la grille CV** autour de `b50_ps2_elo_entbin5_iso` (ent bins, clip, edge) avec les nouveaux signaux 7B — rendement décroissant attendu mais pas testé.
+4. ~~Vraisemblance exacte Gumbel-Max/TextSeal (`logp_target`)~~ — **testée, négative** (§18).
+5. **`unigram_lpg` / `kgw_lpg`** (probabilité verte "boostée" par logits, calculée par `entropy_pass.py` mais jamais câblée dans `smm_scorer.py`) — signal produit mais non exploité ; piste non testée, priorité basse vu le plafond déjà documenté sur Unigram (§9) et le score déjà correctement calibré pour KGW.
+6. ~~Pondération multiplicative par entropie~~ — **testée, négative** ; la version conditionnée (LLR par bin d'entropie) est celle qui paie (§16).
+7. ~~Prior de longueur (mixing/uniforme)~~ — **testé, négatif** (§12).
+8. ~~Shifts faibles / priors à la main~~ — **testé, négatif** (§11).
+9. ~~Unigram~~ — **résolu, plafond atteint** (§9).
+10. ~~Hypothèse vocab KGW~~ — **écartée** (§8).
+
+---
+
+## 14. Comment exécuter
+
+### Pipeline best actuel (public 0.349) — LLR conditionnés par entropie 7B + isotonic
+
+Prérequis : `output/kgw_*.npz` (§8) **et** `output/{entropy,logp,unigram_lpg,kgw_lpg}_*.npz` (7B, §18 — seul `entropy_*` est utilisé par ce config).
 
 ```bash
 cd cispa_final/task_1_text_watermark/alexandre
 
-python cv_smm.py --grid                                   # (re)valider la grille en CV
-python cv_smm.py --final binned50_edge_lo_ps2 --out submission_cv.jsonl
-python ../../shared/submit.py submission_cv.jsonl \
+python cv_smm.py --configs b50_ps2_elo_entbin5_iso              # revalider en CV (0.4301)
+python cv_smm.py --final b50_ps2_elo_entbin5_iso --out submission_entbin5_iso_7b.jsonl
+python ../../shared/submit.py submission_entbin5_iso_7b.jsonl \
   --task-id 30-watermark-localization --action submit --owner ansart1 \
-  --method "SMM + binned LLR + fitted priors (CV-selected)"
+  --method "SMM + entropy-conditioned binned LLR (7B exact entropy) + isotonic smoothing"
+```
+
+### Précalcul signaux GPU 7B (si `output/entropy_*.npz` etc. absents)
+
+```bash
+# Sur JURECA, depuis le login node (nécessite le 7B en cache HF_HOME, ~15 GB)
+jutil env activate -p training2625
+cd /p/home/jusers/ansart1/jureca/code/cispa_final/task_1_text_watermark/alexandre
+sbatch run_entropy.sh
+# -> output/{entropy,logp,unigram_lpg,kgw_lpg}_{train,validation,test}.npz (~14 min A100)
+# Rapatriement (tar pour éviter les soucis de wildcard scp) :
+#   ssh jureca 'cd code/cispa_final/task_1_text_watermark/alexandre/output && tar czf /tmp/gpu_signals.tgz entropy_*.npz logp_*.npz unigram_lpg_*.npz kgw_lpg_*.npz'
+#   scp jureca:/tmp/gpu_signals.tgz output/ && tar xzf output/gpu_signals.tgz -C output/
+```
+
+### Pipeline #509 (public 0.2526) — CV-binned sans entropie
+
+```bash
+python cv_smm.py --final binned50_edge_lo_ps2 --out submission_cv.jsonl
 ```
 
 ### Pipeline #408 — semi-Markov + KGW + Unigram (defaults non fittés)
@@ -324,21 +389,146 @@ bash cispa_final/scripts/fetch_kgw.sh
 
 ---
 
-## 14. Carte des fichiers
+## 15. Carte des fichiers
 
 | Fichier | Rôle |
 | ------- | ---- |
 | `detectors.py` | Signaux PRF CPU (TextSeal, Gumbel-Max) + dédup n-grammes |
 | `unigram_scan.py` | Greenlist Unigram (perm 152064) + scan non supervisé |
-| `smm_scorer.py` | **Modèle retenu** : semi-Markov, 4 signaux (TS+GM+KGW+Unigram) |
-| `run_smm.py` | CLI scoring → JSONL, `--kgw` pour KGW |
-| `fit_smm.py` | Fit supervisé priors + LLR binned sur train |
+| `smm_scorer.py` | **Modèle retenu** : semi-Markov, émissions gaussian/binned/bernoulli + variantes `*_ent` conditionnées par entropie |
+| `run_smm.py` | CLI scoring → JSONL, `--kgw` pour KGW (pipeline gaussien #408) |
+| `fit_smm.py` | Fit supervisé priors + LLR binned (± conditionnés entropie) |
 | `cv_smm.py` | CV 5-fold document-level + `--final` pour soumission |
+| `diagnose_shift.py` | Diagnostic shift labeled vs test sans labels (§12) |
+| `audit_results.py` | Audit local CV : FP/FN, breakdown par scheme, edge vs middle (§17) |
+| `test_no_adjacent.py` | Validation brute-force du fix boundary-bleed (§17) |
 | `kgw_scores.py` | Masques KGW (CUDA Philox, JURECA) |
 | `run_kgw.sh` | SLURM précalcul KGW |
+| `entropy_pass.py` | Pass GPU combiné (7B) : entropie, `logp_target` (LLR exact), `unigram_lpg`, `kgw_lpg` |
+| `run_entropy.sh` | SLURM précalcul du pass GPU combiné, 7B (§18) |
+| `remote_setup_entropy.sh` | Setup login node (deps, cache modèle) + sbatch *(historique, proxy 0.5B)* |
+| `download_entropy_model.py` | Pré-téléchargement modèle proxy (login node) *(historique)* |
+| `poll_entropy.sh` | Poll WSL du job entropie |
 | `../../scripts/fetch_kgw.sh` | Rapatriement `.npz` depuis JURECA |
 | `sweep_shifts.py`, `sweep_prior.py` | Sweeps shifts/priors (train+val) |
 | `hmm_scorer.py`, `run_hmm.py` | *(abandonné v1)* |
 | `matched_filter.py`, `build_scores.py`, `train_calibrator.py` | *(abandonnés)* |
 
-**Sorties soumises :** `submission_smm_cv.jsonl` (**0.2526, best**), `submission_smm_kgw_uni.jsonl` (#408, 0.2037), `submission_smm_kgw.jsonl` (#262, 0.2029), `submission_smm_nokgw.jsonl` (#159, 0.2001). `submission_smm_cvbinned.jsonl` = même config `binned50_edge_lo_ps2` regénérée indépendamment (non soumise, redondante).
+**Sorties soumises :** `submission_entbin5_iso_7b.jsonl` (**#994, 0.349, best**), `submission_smm_entbin.jsonl` (#771, 0.328), `submission_smm_cv.jsonl` (#509, 0.2526), `submission_smm_kgw_uni.jsonl` (#408, 0.2037), `submission_smm_kgw.jsonl` (#262, 0.2029), `submission_smm_nokgw.jsonl` (#159, 0.2001). `submission_smm_cvbinned.jsonl` = même config `binned50_edge_lo_ps2` regénérée indépendamment (non soumise, redondante).
+
+---
+
+## 16. Entropy — LLR conditionnés par bin d'entropie → best public 0.328
+
+### Théorie (TextSeal §3.2)
+
+Un token à faible entropie est quasi déterministe pour le LM : le PRF du watermark n'a eu aucune influence sur son choix → aucun signal, mais du bruit qui consomme du budget FPR. À l'inverse, les tokens à haute entropie portent tout le signal.
+
+### Données : entropies prédictives par token
+
+`entropy_pass.py` (JURECA, 1 GPU, job `15401286`) : forward pass `Qwen2.5-0.5B-Instruct` (proxy — le 7B n'était pas en cache cluster ; TextSeal Fig. 6 valide le proxy) sur les 3 splits → `output/entropy_{split}.npz` (float16, ~40 s pour 1 500 docs). Position 0 = sentinelle −1 (pas de contexte).
+
+### Deux variantes testées — seule la version *apprise* marche
+
+**1. Pondération multiplicative (plan initial) : négatif.** Poids `w = 0.1 + 0.9·f(Ĥ)` (f = linéaire ou √, normalisation percentile 5–95 fittée sur folds de fit) multipliant les LLR : CV 0.3027 (linéaire) / 0.3388 (√) vs 0.3484 baseline. Explication : sous H0 le LLR a un drift négatif (−KL) ; réduire |LLR| des tokens à basse entropie *remonte* les tokens clean vers 0 et casse la séparation au seuil 0.1 % FPR.
+
+**2. LLR conditionnés par entropie (retenu) : +2 pts CV.** Au lieu d'imposer une forme de poids, on **apprend** des tables LLR séparées par bin d'entropie (bins = quantiles H0) : `fit_binned_llr_ent` (TextSeal/Gumbel : table signal × entropie) et `fit_bernoulli_kgw_ent` (taux de verts H1 par bin d'entropie). Le fit découvre seul que le signal est plus discriminant à haute entropie — et gère correctement le drift H0 par construction (chaque table est un vrai LLR).
+
+| Config | CV seed 0 | CV seed 1 |
+| ------ | --------- | --------- |
+| binned50 (#509, sans entropie) | 0.3484 | 0.3516 |
+| entbin3 × 30 bins | 0.3485 | — |
+| entbin3 × 50 bins | 0.3544 | — |
+| entbin5 × 30 bins | 0.3652 | — |
+| **entbin5 × 50 bins (retenu)** | **0.3685** | **0.3545** |
+| entbin7 × 20/30 bins | 0.3536 / 0.3567 | — |
+
+### Soumission
+
+Refit 180 docs + scoring test (`cv_smm.py --final b50_ps2_elo_entbin5`) → **#771, public 0.328** (+30 % rel. vs 0.2526, `improved: true`). Le gain public (+30 %) dépasse même le gain CV (+6 %) — le conditionnement par entropie aide davantage sur la distribution test.
+
+**Levier restant documenté en §13 :** entropies exactes du 7B au lieu du proxy 0.5B.
+
+---
+
+## 17. Audit local + 3 pistes indépendantes (boundary bleed, lissage isotonic, mixture)
+
+En parallèle du travail sur la vraisemblance exacte / KGW par position / données synthétiques (gros leviers GPU, cf. §13), audit **local, sans GPU ni nouvelle donnée** du pipeline #771 (5-fold CV, `audit_results.py`) pour trouver des pistes orthogonales.
+
+### Constats de l'audit
+
+| Constat | Détail |
+| ------- | ------ |
+| TPR très inégal par scheme | Gumbel-Max 62 % des spans détectés, TextSeal 44 %, **KGW 9 %** (malgré valid_frac=0.94) — confirme que le Bernoulli global KGW est le maillon faible (déjà ciblé par l'agent parallèle) |
+| **34 % des spans (269/792) sans signal exploitable**, tous schemes confondus | Score moyen 0.494 (≈ bruit H0 ≈0.497). Cause identifiée : longueur moyenne 73 tokens vs 122–164 pour les spans détectés → pur effet √L (SNR), pas un 5ᵉ scheme caché. Devrait bénéficier de façon disproportionnée à la vraisemblance exacte par token (§13, point 1), qui supprime le bruit d'estimation des tables binnées justement handicapant à petite longueur |
+| **Faux positifs = boundary bleed, pas bruit indépendant** | Sur 4 clusters de FP (runs de 6–10 tokens consécutifs) fixant le seuil à 0.1 % FPR, 3/4 sont à 1–5 tokens d'un vrai span (distances 1, 3, 5) |
+| Spans en bordure de document sous-détectés | 11 % détectés vs 31 % pour les spans internes (88 vs 704 spans) |
+| Longueurs canoniques identiques entre schemes | Piste "prior (scheme, longueur) joint" écartée — rien à gagner |
+
+### Trois fix testés en CV (5-fold, 180 docs)
+
+**A. Interdiction structurelle de deux spans adjacents sans token clean entre eux.** Forward-backward à 2 phases ("après clean" / "après span") ; **losslessy cohérent avec le label truth** (deux positions label=1 consécutives sont toujours fusionnées en un seul span par construction, donc aucune vraie segmentation n'a ce pattern). Validé exact à la précision machine par force brute sur 5 documents synthétiques (`test_no_adjacent.py`). **Gain CV : +0.0006 (bruit)** — le mécanisme dominant des FP n'est donc pas la "double span hallucinée" mais plutôt l'imprécision de frontière d'un span unique (fenêtre glissante mal calée), non couverte par ce fix. **Implémenté (`SmmParams.forbid_adjacent_spans`), non retenu** (complexité non justifiée par le gain).
+
+**B. Lissage isotonic des tables LLR binnées.** Les 4 signaux sont construits pour que "signal plus fort ⇒ plus d'évidence H1" ; imposer une LLR non-décroissante par bin (`IsotonicRegression`, pondérée par comptage) réduit le bruit d'estimation des bins extrêmes — justement ceux qui fixent le seuil à 0.1 % FPR, estimés sur très peu de tokens (180 docs). **Gain CV reproductible : +0.0037 (seed 0, 0.3685→0.3722) et +0.0064 (seed 1, 0.3545→0.3609).** **Retenu.**
+
+**C. Poids de mixture non uniformes par prévalence de scheme.** Le modèle mixe actuellement GM/TS/KGW à poids égal (1/n_hyp) dans le logsumexp ; poids réels ≈ 41/36/22 % parmi les 523 spans assignés avec confiance. **Résultat : négatif partout** (binned: 0.3484→0.3402 ; entbin5: 0.3685→0.3636 ; entbin5+iso: 0.3722→0.3699). Explication probable : sous-pondérer un scheme réduit directement la sensibilité du modèle à ce scheme sans bénéfice structurel équivalent sur le FPR — l'estimation de prévalence (523 spans, bruitée) ne compense pas la perte de sensibilité. **Rejeté.**
+
+### Meilleure config résultante
+
+`b50_ps2_elo_entbin5_iso` (= #771 + lissage isotonic) : **CV 0.3722** vs 0.3685 (#771), soit +1 % relatif. Gain réel mais modeste — **pas encore soumis** : l'agent parallèle modifie activement les mêmes fichiers (`smm_scorer.py`, `fit_smm.py`, émissions `*_exact`) ; le lissage isotonic est une étape générique orthogonale à la source du LLR (empirique binné vs forme fermée) et devrait se composer proprement avec leur travail — préférable de ne pas consommer un slot de soumission sur ce gain isolé avant convergence.
+
+**Fichiers ajoutés :** `audit_results.py` (audit CV : FP/FN, breakdown par scheme, edge vs middle), `test_no_adjacent.py` (validation brute-force du fix A). `fit_binned_llr(..., isotonic=)`, `SmmParams.forbid_adjacent_spans`, `SmmParams.mix_log_weights` dans `smm_scorer.py`/`fit_smm.py`.
+
+---
+
+## 18. Pass GPU 7B combiné : entropie exacte (gros gain) + vraisemblance exacte (négatif) → nouveau best public 0.349
+
+### Objectif
+
+Le proxy Qwen2.5-0.5B (§16) donnait un gain mesuré mais son entropie prédictive **n'est pas celle du vrai générateur** — potentiellement bruitée sur les tokens où 0.5B et 7B divergent. En parallèle, `logp_target` (probabilité que le LM assigne au token réellement généré) permet en théorie de calculer la **vraisemblance exacte** Gumbel-Max/TextSeal sous H1 (détecteur Aaronson : sous watermark, le token choisi maximise `r_v^(1/p_v)`, donc `r | H1 ~ (1/p) r^(1/p-1)` contre `r | H0 ~ Uniform(0,1)` — LLR en forme close, sans passer par des bins empiriques).
+
+Un seul pass GPU (`entropy_pass.py`, réécrit) calcule les quatre signaux en une passe forward sur le **7B** (le générateur réel) : `entropy`, `logp_target`, et par bonus `unigram_lpg`/`kgw_lpg` (probabilité verte "boostée" par les logits, pas encore câblée dans le scorer — cf. §13 point 5).
+
+### Exécution GPU (JURECA)
+
+Job `15401646`, 1×A100, ~14 min, 3 splits (train/val/test, ~1,4 M tokens) — `run_entropy.sh` avec `--require-primary` pour forcer le 7B (pas de fallback silencieux vers un proxy).
+
+**Obstacles résolus en cours de route** (cf. résumé de session) : cache HF du 7B introuvable avec `local_files_only=True` sur le nœud de calcul (fichier `refs/main` manquant après une copie `cp -rL` depuis un cache partagé) ; `HF_HOME` écrasé par `~/.bashrc` dans l'environnement SLURM ; module `unigram_scan.py` absent du dépôt côté cluster (dépôt pas à jour, réuploadé). Aucun de ces problèmes n'affecte la validité des résultats finaux — le job a tourné avec le vrai 7B, vérifié via l'erreur explicite ajoutée dans `load_model()` si `vocab_size != UNIGRAM_VOCAB`.
+
+### Résultat 1 — entropie 7B exacte conditionnée : gros gain confirmé
+
+CV 5-fold, même config (`b50_ps2_elo_entbin5`), seule l'entropie change (proxy 0.5B → 7B) :
+
+| Config | CV TPR@0.1%FPR |
+| ------ | -------------- |
+| binned50 sans entropie (#509) | 0.3484 |
+| entbin5×50, entropie proxy 0.5B (#771) | 0.3685 |
+| **entbin5×50, entropie 7B exacte** | **0.4146** (+12,5 % rel. vs proxy) |
+| **+ lissage isotonic (§17.B)** | **0.4301** (+16,7 % rel. vs proxy) |
+
+C'est de loin le plus gros gain isolé mesuré depuis le passage aux LLR binnés (§11) — confirme l'hypothèse de §13 (proxy 0.5B sous-optimal) et valide le lissage isotonic (§17, alors non soumis faute de convergence avec ce travail) sur les nouveaux signaux.
+
+### Résultat 2 — vraisemblance exacte Gumbel-Max/TextSeal : négatif partout
+
+Testé en ajoutant les émissions `gumbel_exact`/`textseal_exact` (LLR fermé sur `logp_target`) aux émissions binnées existantes (logsumexp = hypothèses alternatives), avec plusieurs variantes de calibration :
+
+| Config | CV TPR@0.1%FPR |
+| ------ | -------------- |
+| binned50 (référence, sans exact) | 0.3484 |
+| + exact (p_min=1e-4, clip=8, défauts) | 0.2790 |
+| exact **seul** (binned retiré) | 0.2478 |
+| + exact, p_min=1e-3 / 1e-5 | 0.2793 / 0.2802 |
+| + exact, clip=4 / clip=12 | 0.3026 / 0.2781 |
+| entbin5+iso (référence, sans exact) | 0.4301 |
+| entbin5 + exact | 0.3510 |
+| entbin5+iso + exact | 0.3573 |
+
+**Verdict : négatif dans toutes les variantes testées (6 combinaisons p_min/clip + isolé + combiné) — rejeté.** Hypothèse la plus probable : le modèle théorique suppose un tirage `argmax` pur sur les logits bruts, alors que la génération réelle utilise vraisemblablement **temperature/top-p sampling** (mentionné comme limite connue dans le commentaire de `Emission.p_min`) — `p_target` (probabilité softmax brute) n'est alors plus la vraie probabilité de sélection sous H0, cassant l'hypothèse `r | H0 ~ Uniform(0,1)` implicite au calcul de LLR. Le signal empirique binné (§11), qui n'a besoin d'aucune hypothèse sur le mécanisme d'échantillonnage, reste strictement supérieur.
+
+**Ne pas réinvestir sur cette piste** sans informations supplémentaires sur les paramètres de génération (température, top-p) — actuellement inconnus.
+
+### Soumission
+
+`cv_smm.py --final b50_ps2_elo_entbin5_iso` (entropie 7B + isotonic, **sans** vraisemblance exacte) → **#994, public 0.349** (+6,3 % rel. vs #771). Gain public plus modeste que le gain CV (+16,7 %) — cohérent avec le pattern déjà documenté (§10, §16) où les gains CV ne transfèrent jamais à 100 % au public, sans que ce soit un signal de sur-ajustement (ratio public/CV reste dans la fourchette observée historiquement).
+
+**Format vérifié avant soumission :** 1320/1320 docs, scores ∈ [0.446, 0.569] (plage resserrée autour de 0.5, cohérente avec les soumissions précédentes).

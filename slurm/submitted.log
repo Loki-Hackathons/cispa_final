@@ -3,3 +3,4 @@
 #
 # Example:
 # 2026-06-29 14:05 | ansart1 | task_1/attempt1/run.sh | job_id=123456 | 2xGPU | lock_ram iteration
+2026-07-02 20:28 | ansart1 | task_1_text_watermark/alexandre/run_entropy.sh | job_id=15401286 | 1xGPU | per-token entropy pass (Qwen2.5-0.5B proxy), all splits

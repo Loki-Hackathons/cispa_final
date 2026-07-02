@@ -104,6 +104,28 @@ def gumbelmax_signal(token_ids: list[int]) -> np.ndarray:
     return out
 
 
+def gumbelmax_r(token_ids: list[int]) -> np.ndarray:
+    """Raw PRF draw r in [0,1] per token (H0: uniform). Positions < ngram get 0.5."""
+    out = np.full(len(token_ids), 0.5, dtype=np.float64)
+    windows, targets, start = _windows_and_targets(token_ids, GUMBEL_NGRAM)
+    if len(targets) == 0:
+        return out
+    out[start:] = prf_uniform(windows, targets, GUMBEL_KEY).numpy()
+    return out
+
+
+def textseal_r(token_ids: list[int]) -> tuple[np.ndarray, np.ndarray]:
+    """Raw dual-key PRF draws (r_a, r_b), each H0: uniform. < ngram -> 0.5."""
+    out_a = np.full(len(token_ids), 0.5, dtype=np.float64)
+    out_b = np.full(len(token_ids), 0.5, dtype=np.float64)
+    windows, targets, start = _windows_and_targets(token_ids, TEXTSEAL_NGRAM)
+    if len(targets) == 0:
+        return out_a, out_b
+    out_a[start:] = prf_uniform(windows, targets, TEXTSEAL_KEY_A).numpy()
+    out_b[start:] = prf_uniform(windows, targets, TEXTSEAL_KEY_B).numpy()
+    return out_a, out_b
+
+
 _UNIGRAM_MASK_CACHE: dict[int, np.ndarray] = {}
 
 
