@@ -15,7 +15,7 @@ Live scratchpad for the team. Update during the hackathon.
 | Owner `hackathon_setup.sh` | ansart1 | ⏳ after SSH to judac |
 | Teammate `teammate.sh` | others | ⏳ after owner |
 | Local dashboard mock | ansart1 | ✅ `MODE=mock`, health OK |
-| API key from organizers | team | ⏳ contact if missing |
+| API key from organizers | team | ✅ Loki — cluster `.env` only |
 
 **JUDAC** = data access + global filesystem only (no GPU). **JURECA** = GPU jobs via SLURM — expect a separate JuDoor email when granted.
 
@@ -64,13 +64,7 @@ Check live: `squeue -A training2625` (JURECA only)
 
 ## API / Leaderboard
 
-- Base URL: TBD
-- Leaderboard: http://35.192.205.84/leaderboard_page
-- API keys: in cluster `.env` only (never commit)
-
-Cooldowns (from task specs — verify at finals):
-- Submit: ~5 min (Task 3: 2 min after error)
-- Query/logits: ~15 min (regional reference)
+URL, `--task-id`, `.env` fields: `docs/subject/subject.md` § API. Leaderboard UI: http://35.192.205.84/leaderboard_page
 
 Run browser dashboard or `python shared/dashboard.py` for cooldown status.
 

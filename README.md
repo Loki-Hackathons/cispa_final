@@ -80,6 +80,8 @@ cispa_final/
 
 Activate the venv first (`source .venv/bin/activate` or `.\.venv\Scripts\Activate.ps1`).
 
+Fill `CISPA_BASE_URL` + `CISPA_API_KEY` in `.env` (organizer team token). API URL and `--task-id` values: [docs/subject/subject.md](docs/subject/subject.md#api--leaderboard).
+
 ```bash
 # Submit to leaderboard
 python shared/submit.py output/submission.npz --task-id <TASK_ID> --action submit

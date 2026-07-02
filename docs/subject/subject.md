@@ -58,9 +58,9 @@ Full spec: [Task 3 Description.md](../Task%203%20Description.md)
 
 ## API / Leaderboard
 
-- Base URL: TBD (organizer API key per team)
-- Leaderboard: http://35.192.205.84/leaderboard_page
-- API keys: cluster `.env` only — never commit
+- **`.env`:** `CISPA_BASE_URL=http://35.192.205.84`, `CISPA_API_KEY=<organizer team token>` (never commit; not watermark YAML keys)
+- **`--task-id`:** `30-watermark-localization` (T1 `.jsonl`), `29-mgi` (T2 `.npz`), `21-fl-audit` (T3 `.pt`) — same as HF `submission_template.py` / `task_template.py`
+- **Cooldowns:** server enforces ~5 min between submits; `CISPA_SUBMIT_COOLDOWN` / `CISPA_QUERY_COOLDOWN` in `.env` are local dashboard hints only
 
 ## Task directories (repo)
 

@@ -17,10 +17,9 @@ description: Submit results and analyze API feedback for CISPA hackathon tasks. 
 Store in `.env` on cluster (never commit):
 
 ```bash
-CISPA_BASE_URL=http://HOST:PORT
-CISPA_API_KEY=your_key
-CISPA_SUBMIT_COOLDOWN=300    # 5 min (regional reference)
-CISPA_QUERY_COOLDOWN=900     # 15 min (regional reference)
+CISPA_BASE_URL=http://35.192.205.84
+CISPA_API_KEY=your_key       # organizer team token
+# --task-id: 30-watermark-localization | 29-mgi | 21-fl-audit (see docs/subject/subject.md)
 ```
 
 ## Submit

@@ -87,7 +87,7 @@ pip install -r shared/requirements.txt
 
 ```bash
 cp .env.example .env
-# Edit .env with real CISPA_BASE_URL and CISPA_API_KEY when available
+# Fill CISPA_* from docs/subject/subject.md § API (organizer team token)
 source .env  # or: export $(grep -v '^#' .env | xargs)
 ```
 
