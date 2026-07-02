@@ -196,3 +196,119 @@ def dedup_select(
         pad = torch.rand(k - out.shape[0], *config.IMG_SHAPE)
         out = torch.cat([out, pad], dim=0) if out.numel() else pad
     return out[:k].contiguous().float()
+
+
+# --------------------------------------------------------------------------- #
+# SSIM (the actual competition metric; used only for INTERNAL selection and
+# cross-model diagnostics — never against ground truth or the leaderboard)
+# --------------------------------------------------------------------------- #
+def _gaussian_window(size: int = 11, sigma: float = 1.5) -> torch.Tensor:
+    coords = torch.arange(size, dtype=torch.float32) - (size - 1) / 2
+    g = torch.exp(-(coords ** 2) / (2 * sigma ** 2))
+    g = g / g.sum()
+    return g.outer(g)  # (size, size)
+
+
+def ssim(a: torch.Tensor, b: torch.Tensor, window_size: int = 11,
+         sigma: float = 1.5) -> torch.Tensor:
+    """Mean structural similarity per image pair. a,b: (N,C,H,W) in [0,1].
+
+    Returns (N,) SSIM values. Matches the standard Wang et al. formulation
+    (Gaussian window, C1/C2 for dynamic range 1.0), averaged over channels.
+    """
+    a = to_unit(a).float()
+    b = to_unit(b).float()
+    c = a.shape[1]
+    win = _gaussian_window(window_size, sigma).to(a.device)
+    win = win.expand(c, 1, window_size, window_size).contiguous()
+    pad = window_size // 2
+
+    def filt(x):
+        return F.conv2d(x, win, padding=pad, groups=c)
+
+    mu_a, mu_b = filt(a), filt(b)
+    mu_a2, mu_b2, mu_ab = mu_a * mu_a, mu_b * mu_b, mu_a * mu_b
+    sa = filt(a * a) - mu_a2
+    sb = filt(b * b) - mu_b2
+    sab = filt(a * b) - mu_ab
+    c1, c2 = 0.01 ** 2, 0.03 ** 2
+    smap = ((2 * mu_ab + c1) * (2 * sab + c2)) / \
+           ((mu_a2 + mu_b2 + c1) * (sa + sb + c2))
+    return smap.mean(dim=(1, 2, 3))
+
+
+def ssim_matrix(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """Pairwise SSIM between every image in a (Na) and b (Nb) -> (Na, Nb).
+
+    O(Na*Nb) forward passes worth of work; fine for a few hundred images.
+    """
+    na, nb = a.shape[0], b.shape[0]
+    out = torch.zeros(na, nb)
+    for i in range(na):
+        rep = a[i:i + 1].expand(nb, -1, -1, -1)
+        out[i] = ssim(rep, b)
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# K-means diverse selection: better coverage of the distinct images than the
+# greedy dedup (which can cluster around a few easy reconstructions).
+# --------------------------------------------------------------------------- #
+def kmeans_select(imgs: torch.Tensor, scores: torch.Tensor,
+                  k: int = config.BATCH, iters: int = 25,
+                  seed: int = config.SEED) -> torch.Tensor:
+    """Cluster candidates into k groups; return the best-scoring member of each.
+
+    Gives one representative per visual cluster, so the 128 outputs cover 128
+    *distinct* reconstructions rather than 128 near-duplicates of the easiest
+    few. Falls back to noise padding if fewer than k candidates exist.
+    """
+    imgs = to_unit(imgs)
+    n = imgs.shape[0]
+    if n == 0:
+        return torch.rand(k, *config.IMG_SHAPE).float()
+    if n <= k:
+        out = imgs
+        if n < k:
+            pad = torch.rand(k - n, *config.IMG_SHAPE)
+            out = torch.cat([out, pad], dim=0)
+        return out[:k].contiguous().float()
+
+    fp = _fingerprints(imgs)                     # (n, d) unit vectors
+    g = torch.Generator().manual_seed(seed)
+    # k-means++-ish init: seed with the top-score candidate then farthest points.
+    centers = [int(torch.argmax(scores))]
+    d2 = 1.0 - (fp @ fp[centers[0]]).clamp(-1, 1)
+    for _ in range(1, k):
+        nxt = int(torch.argmax(d2))
+        centers.append(nxt)
+        d2 = torch.minimum(d2, 1.0 - (fp @ fp[nxt]).clamp(-1, 1))
+    cen = fp[torch.tensor(centers)]
+
+    assign = torch.zeros(n, dtype=torch.long)
+    for _ in range(iters):
+        sims = fp @ cen.t()                      # (n, k) cosine sim
+        assign = sims.argmax(dim=1)
+        for j in range(k):
+            m = assign == j
+            if m.any():
+                cen[j] = F.normalize(fp[m].mean(dim=0), dim=0)
+
+    chosen = []
+    for j in range(k):
+        m = (assign == j).nonzero(as_tuple=True)[0]
+        if m.numel() == 0:
+            continue
+        best = m[torch.argmax(scores[m])]
+        chosen.append(int(best))
+    # Fill any empty clusters with next best unused candidates.
+    if len(chosen) < k:
+        order = torch.argsort(scores, descending=True).tolist()
+        chosen_set = set(chosen)
+        for idx in order:
+            if idx not in chosen_set:
+                chosen.append(idx)
+                chosen_set.add(idx)
+            if len(chosen) >= k:
+                break
+    return imgs[torch.tensor(chosen[:k], dtype=torch.long)].contiguous().float()

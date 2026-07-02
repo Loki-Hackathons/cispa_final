@@ -47,23 +47,10 @@ def dump_keys(i: int):
 
 
 def save_preview(i: int, n: int = 64):
-    try:
-        from torchvision.utils import save_image
-    except Exception:
-        print("torchvision not available; skipping image dump")
-        return
-    g = utils.load_gradient(i)
-    info = extract.introspect(i, g)
-    cands = extract.extract_analytic(info)
-    if cands.shape[0] == 0:
-        print(f"model{i}: no analytic candidates")
-        return
-    scores = utils.quality_score(cands)
-    top = cands[torch.argsort(scores, descending=True)][:n]
-    os.makedirs(config.OUT_DIR, exist_ok=True)
-    path = os.path.join(config.OUT_DIR, f"preview_model{i}.png")
-    save_image(utils.to_unit(top), path, nrow=8)
-    print(f"model{i}: saved {top.shape[0]} top candidates -> {path}")
+    """Delegate to analyze.preview, which saves .npy always and PNG when a
+    renderer (torchvision/PIL/matplotlib) is available — no hard dependency."""
+    import analyze
+    analyze.preview([i], select="quality", n=n)
 
 
 def main():

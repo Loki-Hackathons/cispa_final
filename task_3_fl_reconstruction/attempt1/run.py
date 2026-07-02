@@ -55,8 +55,15 @@ def _optimize(i, grad, info, init, steps):
     return imgs, model, labels
 
 
+def _select(cands, scores, mode):
+    if mode == "kmeans":
+        return utils.kmeans_select(cands, scores, k=config.BATCH)
+    return utils.dedup_select(cands, scores, k=config.BATCH)
+
+
 def reconstruct_model(i: int, use_opt: bool, steps: int,
-                      allow_guessed: bool = False) -> tuple[torch.Tensor, str]:
+                      allow_guessed: bool = False,
+                      select: str = "quality") -> tuple[torch.Tensor, str]:
     grad = utils.load_gradient(i)
     info = extract.introspect(i, grad)
 
@@ -67,7 +74,7 @@ def reconstruct_model(i: int, use_opt: bool, steps: int,
     analytic_imgs = None
     if n_c > 0:
         scores = utils.quality_score(cands)
-        analytic_imgs = utils.dedup_select(cands, scores, k=config.BATCH)
+        analytic_imgs = _select(cands, scores, select)
 
     imgs = analytic_imgs
 
@@ -131,6 +138,8 @@ def main():
     ap.add_argument("--allow-guessed-forward", action="store_true",
                     help="EXPERIMENTAL: also optimize CNN/ViT with our guessed "
                          "forward models (risky: broke leaderboard 0.1427->0.0635)")
+    ap.add_argument("--select", choices=["quality", "kmeans"], default="quality",
+                    help="how to pick the 128 images from analytic candidates")
     args = ap.parse_args()
 
     torch.manual_seed(config.SEED)
@@ -147,7 +156,8 @@ def main():
 
     for i in args.models:
         imgs, _ = reconstruct_model(i, args.optimize, args.steps,
-                                    allow_guessed=args.allow_guessed_forward)
+                                    allow_guessed=args.allow_guessed_forward,
+                                    select=args.select)
         submission[f"model{i}"] = imgs
         if args.save_part:
             part = os.path.join(args.save_part, f"model{i}.pt")
