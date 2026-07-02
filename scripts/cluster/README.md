@@ -52,6 +52,15 @@ bash scripts/cluster/configure_scripts.sh   # run from directory containing the 
 bash scripts/task1/sync_watermark_repos.sh    # pin Task 1 detector submodules
 ```
 
+**Stuck on `git pull` (local edits to `config.py`, `AGENTS.md`, etc.)?** On JURECA only — do not commit cluster tweaks. Reset to GitHub:
+
+```bash
+cd /p/home/jusers/ansart1/jureca/code/cispa_final
+bash scripts/cluster/sync_repo_from_github.sh
+```
+
+Creates `dashboard/config_local.py` with `MODE=live` if missing. Never edit tracked `dashboard/config.py` on the cluster.
+
 ## Teammate bootstrap
 
 After owner completes setup — same SSH host (`judac.fz-juelich.de` until JURECA granted):
