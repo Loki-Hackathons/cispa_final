@@ -7,7 +7,7 @@ Checklist to run before and at the start of the CISPA finals. Do Phase A now; Ph
 ### 1. SSH and project
 
 ```bash
-ssh -i ~/.ssh/id_ed25519 -o Ciphers=aes256-ctr -o MACs=hmac-sha2-256-etm@openssh.com <user>@jureca.fz-juelich.de
+ssh -i ~/.ssh/id_ed25519 -o Ciphers=aes256-ctr -o MACs=hmac-sha2-256-etm@openssh.com ansart1@jureca.fz-juelich.de
 jutil env activate -p training2557
 ```
 
@@ -45,6 +45,8 @@ module load GCC CUDA PyTorch torchvision
 source .venv/bin/activate
 ```
 
+
+
 ### 3b. Local environment (laptop — optional)
 
 For mock dashboard and CPU-only scripting without JURECA. Full commands: [README.md](../README.md#quick-start-local).
@@ -73,6 +75,8 @@ pip install -r shared/requirements.txt
 
 > Dashboard mock test can use `dashboard/requirements.txt` only (lighter, no torch). Use `shared/requirements.txt` when you need the full hackathon stack locally.
 
+
+
 ### 4. Environment variables
 
 ```bash
@@ -80,6 +84,8 @@ cp .env.example .env
 # Edit .env with real CISPA_BASE_URL and CISPA_API_KEY when available
 source .env  # or: export $(grep -v '^#' .env | xargs)
 ```
+
+
 
 ### 5. W&B setup (can test before hackathon)
 
@@ -100,6 +106,8 @@ print('W&B OK')
 ```
 
 - [ ] All teammates see the smoke-test run on the dashboard
+
+
 
 ### 6. GPU smoke test (SLURM)
 
@@ -147,7 +155,7 @@ bash scripts/build_dashboard.sh
 python -m uvicorn dashboard.server:app --host 127.0.0.1 --port 8080
 ```
 
-3. Check API: `Invoke-RestMethod http://127.0.0.1:8080/api/health` (PowerShell) or `curl http://127.0.0.1:8080/api/health`
+1. Check API: `Invoke-RestMethod http://127.0.0.1:8080/api/health` (PowerShell) or `curl http://127.0.0.1:8080/api/health`
 
 **On cluster (live)** — set `MODE = "live"` in `dashboard/config.py`, then:
 
@@ -159,6 +167,8 @@ python -m uvicorn dashboard.server:app --host 127.0.0.1 --port 8080
 Run the server in a dedicated tmux pane during the hackathon. Fallback TUI: `python shared/dashboard.py`.
 
 ---
+
+
 
 ## Phase B — When subject is released (first 30 min)
 
@@ -175,45 +185,58 @@ python shared/submit.py <file> --task-id <TASK_ID> --action submit
 python shared/analyze.py <file> --task-id <TASK_ID> --mode api --dataset <path>
 ```
 
-8. **SLURM** — confirm `squeue -A training2557` shows expected jobs only
+1. **SLURM** — confirm `squeue -A training2557` shows expected jobs only
 
 ---
+
+
 
 ## Phase C — Sanity checklist
 
-| Check | Done |
-|-------|------|
-| SSH + tmux works for all 4 teammates | |
-| Shared venv imports all packages | |
-| W&B dashboard shows smoke-test from everyone | |
-| 1-GPU SLURM job completes in <5 min | |
-| `docs/subject/subject.md` filled in | |
-| `notes-communes.md` assignments + GPU table updated | |
-| ACLs: everyone can write to shared folder | |
-| API keys in cluster `.env`, not in git | |
-| Browser dashboard: next actions, progress, failures (mock) | |
-| Live dashboard on cluster + SSH tunnel tested | |
+
+| Check                                                      | Done |
+| ---------------------------------------------------------- | ---- |
+| SSH + tmux works for all 4 teammates                       |      |
+| Shared venv imports all packages                           |      |
+| W&B dashboard shows smoke-test from everyone               |      |
+| 1-GPU SLURM job completes in <5 min                        |      |
+| `docs/subject/subject.md` filled in                        |      |
+| `notes-communes.md` assignments + GPU table updated        |      |
+| ACLs: everyone can write to shared folder                  |      |
+| API keys in cluster `.env`, not in git                     |      |
+| Browser dashboard: next actions, progress, failures (mock) |      |
+| Live dashboard on cluster + SSH tunnel tested              |      |
+
 
 ---
 
+
+
 ## Tool quick reference
 
-| Tool | Install | When to use |
-|------|---------|-------------|
-| **W&B** | in `requirements.txt` | Training tasks — loss curves, team visibility |
-| **torchattacks** | in `requirements.txt` | Adversarial attack prototyping (PGD, MI-FGSM) |
-| **timm** | in `requirements.txt` | Pretrained CV models (ConvNeXt, EfficientNet) |
-| **Optuna** | in `requirements.txt` | Threshold tuning (`shared/tune_thresholds.py`) |
+
+| Tool                  | Install                                  | When to use                                                                                          |
+| --------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| **W&B**               | in `requirements.txt`                    | Training tasks — loss curves, team visibility                                                        |
+| **torchattacks**      | in `requirements.txt`                    | Adversarial attack prototyping (PGD, MI-FGSM)                                                        |
+| **timm**              | in `requirements.txt`                    | Pretrained CV models (ConvNeXt, EfficientNet)                                                        |
+| **Optuna**            | in `requirements.txt`                    | Threshold tuning (`shared/tune_thresholds.py`)                                                       |
 | **Browser dashboard** | `python -m uvicorn dashboard.server:app` | Mock/live via `MODE` in `dashboard/config.py` — see [dashboard-mock-test.md](dashboard-mock-test.md) |
-| **TUI dashboard** | `python shared/dashboard.py` | Terminal fallback |
-| **tmux** | system | Survive SSH disconnects |
+| **TUI dashboard**     | `python shared/dashboard.py`             | Terminal fallback                                                                                    |
+| **tmux**              | system                                   | Survive SSH disconnects                                                                              |
+
+
+
 
 ## Where to put the subject
 
-| What | Where |
-|------|-------|
-| Task descriptions | `docs/subject/subject.md` |
-| Raw organizer files | `docs/subject/task_*.txt` |
-| Live team notes | `docs/notes-communes.md` |
-| Agent context | `AGENTS.md` → Current tasks section |
-| Starter code | `task_N_<name>/attempt1/task_template.py` |
+
+| What                | Where                                     |
+| ------------------- | ----------------------------------------- |
+| Task descriptions   | `docs/subject/subject.md`                 |
+| Raw organizer files | `docs/subject/task_*.txt`                 |
+| Live team notes     | `docs/notes-communes.md`                  |
+| Agent context       | `AGENTS.md` → Current tasks section       |
+| Starter code        | `task_N_<name>/attempt1/task_template.py` |
+
+
