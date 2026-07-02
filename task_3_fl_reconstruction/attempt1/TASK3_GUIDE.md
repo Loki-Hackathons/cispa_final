@@ -474,13 +474,20 @@ CPU, seconds per model, no leaderboard needed to validate.
 | `reconstruct_v2.py` | Orchestrates per family + `--diagnose` mode (recoverability table + preview PNGs). MLP-ReLU rows are **clamped** (true [0,1] scale) instead of min/max-stretched → better SSIM luminance term. |
 | `selftest_v2.py` | Synthetic trap-weight MLP+CNN end-to-end check. Passes at MLP 1.00 / CNN 0.99 nearest-match SSIM. |
 
-**Step 1 — diagnose (no GPU), look at the previews:**
+**Step 0 — environment (copy-paste exactly; never use `...` paths from chat):**
 
 ```bash
 cd /p/scratch/training2625/dougnon1/Loki/cispa_final/task_3_fl_reconstruction/attempt1
-export TASK3_DATA_ROOT=/p/scratch/training2625/dougnon1/Loki/FL_Data_Reconstruction
-source $TASK3_DATA_ROOT/.venv/bin/activate
+source setup_cluster.sh
+```
 
+This sets `TASK3_DATA_ROOT`, activates `.venv`, and `cd`s into `attempt1`. If you
+already ran `export TASK3_DATA_ROOT=.../FL_Data_Reconstruction` by mistake, open a
+new shell or run `unset TASK3_DATA_ROOT` then `source setup_cluster.sh` again.
+
+**Step 1 — diagnose (no GPU), look at the previews:**
+
+```bash
 python channels.py                       # which CNN models are transmit-trapped?
 python reconstruct_v2.py --diagnose      # per-model: valid rows / clusters / conf>.5 / transmit
 #  -> eyeball output/v2_diag/v2_model*.png : recognizable = recoverable
