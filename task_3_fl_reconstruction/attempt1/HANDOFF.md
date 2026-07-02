@@ -226,3 +226,401 @@ Alternative : `python shared/submit.py <fichier>.pt --task-id 21-fl-audit --acti
 - `merge.py` — assemble les parts dans une soumission
 - `TASK3_GUIDE.md` — guide opérationnel complet
 - `setup_cluster.sh` — met les variables d'env + venv (⚠ chemin scratch en dur)
+
+---
+
+# Annexe — Récapitulatif complet (historique avant + pendant v2)
+
+> **Lecture croisée obligatoire.** Cette annexe documente tout le travail **avant** le pipeline
+> `reconstruct_v2.py` (CNN invert + ViT = best **0.2469**, ID 645) **et** les leçons empiriques
+> accumulées sur 12+ soumissions. Le **best actuel est 0.255** (ID 1114, `submission_v2.pt`).
+> Les deux pipelines coexistent dans le repo :
+>
+> | Pipeline | Fichiers clés | Best score | Rôle |
+> |---|---|---|---|
+> | **Legacy (CNN invert + ViT)** | `cnn_invert.py`, `run.py --optimize`, `rebuild.SimpleViT` | 0.2469 (`sub_vit_both.pt`) | CNN GPU inversion, ViT gradient match — **prouvé sur le leaderboard** |
+> | **v2 (analytique amélioré)** | `reconstruct_v2.py`, `channels.py`, `separation.py` | **0.255** (`submission_v2.pt`) | CPU, fix couleur transmit, sélection `own_margin`, filtre bruit |
+>
+> **Stratégie recommandée pour la suite :** partir de `submission_v2.pt` (0.255) comme base,
+> **réintégrer** les modèles où le legacy était meilleur (CNN invert GPU pour 2/3/6/7/10/12,
+> ViT 9/11 depuis `sub_vit_both.pt`), plutôt que de repartir de zéro sur l'un ou l'autre.
+> Certaines leçons de l'annexe (ex. « MLP refine dégrade ») contredisent la roadmap §8 — elles
+> viennent de tests **sans** garde anti-régression et **sans** le pipeline v2 ; à re-tester
+> prudemment, pas à appliquer aveuglément.
+
+## Récapitulatif complet — Task 3 (depuis le début de cette conversation)
+
+Document de synthèse : code, stratégie, résultats, erreurs à ne pas refaire, et état historique.
+
+### 1. Contexte du projet
+
+| Élément | Détail |
+|---|---|
+| Équipe | Loki (CISPA hackathon finals) |
+| Tâche | Task 3 — FL Data Reconstruction |
+| Objectif | Reconstruire 1536 images (12 modèles × 128) depuis gradients + modèles white-box |
+| Métrique | Mean SSIM avec matching optimal 1-vers-1 par modèle |
+| Repo | `cispa_final/task_3_fl_reconstruction/attempt1/` |
+| Cluster | JURECA, `training2625`, données dans `FL_Data_Reconstruction/` |
+| Best score (legacy, fin phase ViT) | **0.2469** (`sub_vit_both.pt`, submission ID 645) |
+| Best score (actuel, pipeline v2) | **0.255** (`submission_v2.pt`, submission ID 1114) |
+
+On partait d'environ 0.24 en début de conversation ; on est montés à 0.2469 en finissant le ViT
+(9 + 11), puis à **0.255** avec le pipeline v2 analytique amélioré.
+
+### 2. Les 12 modèles et ce qu'on sait (stratégie legacy)
+
+| # | Family | Activation | Shape interne | Stratégie retenue (legacy) |
+|---|---|---|---|---|
+| 1 | mlp | sigmoid | (3,64,64) | Analytique net.0 — ne pas toucher |
+| 2 | cnn | tanh | (8,16,16) | Inversion conv (`cnn_invert`) |
+| 3 | cnn | relu | (8,8,8) | Inversion + 5000 steps |
+| 4 | mlp | tanh | (3,64,64) | Analytique — ne pas refine |
+| 5 | mlp | relu | (3,64,64) | Analytique — ne pas toucher |
+| 6 | cnn | relu | (8,64,64) | Inversion (MSE local énorme mais aide au SSIM) |
+| 7 | cnn | relu | (8,16,16) | Inversion |
+| 8 | mlp | relu | (3,64,64) | Analytique — ne pas toucher |
+| 9 | vit | gelu | (3,64,64) | Gradient matching (cls + norm) |
+| 10 | cnn | relu | (8,64,64) | Inversion |
+| 11 | vit | gelu | (3,64,64) | Gradient matching (fc_norm, pas de cls) |
+| 12 | cnn | sigmoid | (8,64,64) | Inversion |
+
+Règle empirique : les batches sont distincts entre modèles — on ne réutilise pas les mêmes
+images d'un modèle à l'autre.
+
+> **Note v2 :** le pipeline `reconstruct_v2.py` remplace partiellement ces choix par une
+> approche analytique unifiée (transmit filters + `own_margin`). Voir §6 du corps principal
+> pour l'état v2 par modèle.
+
+### 3. Architecture du code (attempt1/)
+
+```
+attempt1/
+├── config.py           # chemins, BATCH=128, EPS, seuils dedup
+├── utils.py            # IO, validate, to_unit, quality_score, dedup, TV, SSIM
+├── extract.py          # extraction analytique Boenisch (MLP net.0, CNN fc1)
+├── rebuild.py          # MLP/CNN/ViT exacts ou best-effort, gradient matching
+├── run.py              # orchestrateur 12 modèles ; optimize gated MLP/ViT
+├── cnn_invert.py       # ★ inversion CNN via vraie conv
+├── fc1_analytic.py     # confiance d'isolement des lignes fc1
+├── mlp_reconstruct.py  # sélection MLP + refine optionnel
+├── diagnose_mlp.py     # diagnostic MLP
+├── diagnose_model.py   # target vs pred CNN (model6)
+├── merge.py, submit.py, analyze.py, inspect_models.py
+├── slurm_cnn_invert.sh, slurm_mlp_refine.sh
+├── reconstruct_v2.py   # ★ pipeline v2 (CPU, post-legacy)
+├── channels.py         # ★ inversion transmit CNN (v2)
+├── separation.py       # ★ clustering + own_margin + structure gate (v2)
+├── bench_selection.py  # benchmark synthétique sélection (v2)
+└── TASK3_GUIDE.md
+```
+
+**Rôles principaux**
+
+| Fichier | Rôle |
+|---|---|
+| `extract.py` | `row_i = gW_i / gb_i` sur net.0 (MLP) ou fc1 (CNN) → candidats |
+| `cnn_invert.py` | Optimise des pixels x pour `activation(conv(x)) ≈ target` |
+| `rebuild.py` | Reconstruit le forward ; `gradient_match()` pour ViT/MLP refine |
+| `run.py` | Pipeline par modèle : analytic → sélection 128 → optimize optionnel |
+| `utils.py` | `dedup_select`, `quality_score`, validation soumission |
+| `reconstruct_v2.py` | Pipeline v2 unifié (CPU) — voir §3 corps principal |
+
+### 4. Les trois familles — comment ça marche dans le code
+
+#### A. CNN (modèles 2,3,6,7,10,12) — cœur du score ~0.24 (legacy)
+
+**Étape 1 — Extraction analytique (fc1)**
+
+```python
+row_i = gradient_fc1.weight[i] / gradient_fc1.bias[i]
+# → feature map (8, H, W)
+```
+
+**Étape 2a — Baseline (0.1427)** : `features_to_image` = moyenne 8→3 canaux + upscale 64×64.
+Ce n'est pas une vraie image.
+
+**Étape 2b — `cnn_invert.py` (gagnant legacy)** :
+
+- Trouver x (3,64,64) tel que `activation(conv(x)) ≈ target`
+- `loss = MSE(pred, target) + tv_weight * TV(x)`
+- `conv` = vrais poids du state_dict
+- Seule approximation : `adaptive_avg_pool` si taille ≠ feature_shape
+- Adam, 2000–5000 steps, garde le meilleur feat_loss
+
+`fc1_analytic.py` (ajouté plus tard) : score de confiance d'isolement des lignes fc1 avant
+sélection (détecter model6 contaminé).
+
+#### B. MLP (modèles 1,4,5,8)
+
+Extraction : même formule sur net.0 — la ligne est déjà l'image aplatie (12288 = 3×64×64).
+
+```python
+# extract_mlp → flat_to_image → dedup_select 128 images
+```
+
+Pas de conv à inverser : l'analytique est la reconstruction directe (exacte si un seul neurone
+ReLU isolé).
+
+`mlp_reconstruct.py` : pour ReLU, tri par `own_activation` (neurone actif sur sa propre ligne)
++ dedup.
+
+#### C. ViT (modèles 9, 11)
+
+Pas d'analytique propre → `run.py --optimize --allow-guessed-forward`.
+
+- Rebuild `SimpleViT` depuis state_dict (noms timm)
+- Labels via iDLG (`infer_labels` sur head.bias)
+- `gradient_match` : minimise `1 - cos(grad_simulé, G_observé) + TV(x)`
+- **Fix model11** : variante `global_pool=avg` → `fc_norm` après mean-pooling, pas de
+  `cls_token`. Ancien code attendait `norm` → rebuild échouait → bruit.
+
+### 5. Chronologie de cette conversation
+
+#### Phase 1 — Comprendre CNN et ablation
+
+- Explication : x, conv(x), pred, target, 3000 itérations
+- Ablation par modèle (`inv2.pt` … `inv12.pt`) depuis `submission_analytic.pt`
+- `feature_mse` : 2,10,12 excellents ; 3,7 moyens ; 6 ≈ 17 (bloqué)
+
+#### Phase 2 — Consolidation CNN
+
+| Soumission | Score | Contenu |
+|---|---|---|
+| 192 | 0.2404 | Tous CNN inversés |
+| 316 | 0.2418 | `submission_all_m3_5k.pt` (model3 @ 5000) |
+
+#### Phase 3 — Tests d'exclusion CNN (erreur de hypothèse, mais utile)
+
+| Fichier | Score | Leçon |
+|---|---|---|
+| `submission_no6.pt` | 0.239 | −0.0027 — ne pas enlever model6 |
+| `submission_no6_no7_m3_5k.pt` | 0.229 | −0.0128 — ne pas enlever 6 ni 7 |
+| `submission_all_m3_m7_5k.pt` | 0.2417 | model7@5k inutile |
+
+**Règle validée :** ne jamais remplacer une inversion CNN par l'analytique, même si MSE local
+est catastrophique (model6).
+
+#### Phase 4 — MLP (échec confirmé, legacy)
+
+Diagnostic :
+
+- model1 sigmoid: quality top128 ~0.077, own_active ~0.50
+- model4 tanh   : ~0.080, own_active ~0.47
+- model5 relu   : ~0.080, own_active ~0.66
+- model8 relu   : ~0.065, own_active ~0.57
+
+| Test | Score | vs 0.2418 |
+|---|---|---|
+| `sub_mlp_sel.pt` (sélection améliorée) | 0.2367 | −0.005 |
+| `sub_mlp_refine.pt` (gradient match 1,4) | 0.1997 | −0.042 |
+
+**MLP fermé (legacy) :** garder l'analytique déjà dans la base.
+
+> **Note v2 :** `bench_selection.py` montre que la sélection `own_margin` est quasi-optimale
+> en régime isolé ; le refine MLP legacy échouait sans garde anti-régression et sans warm-start
+> v2. À re-tester avec `run.py --optimize` si besoin (§8 corps principal).
+
+#### Phase 5 — ViT (succès legacy)
+
+| Étape | Résultat |
+|---|---|
+| `inspect_models.py --keys 9 11` | Architectures différentes |
+| Rebuild test | model9 OK ; model11 FAILED (fc_norm vs norm) |
+| `sub_vit.pt` (job avec 9+11, mais 11 en bruit) | 0.2432 (+0.0014) |
+| Fix `rebuild.py` SimpleViT | Support fc_norm + avg pool |
+| **`sub_vit_both.pt`** | **0.2469 (+0.0037) — record legacy** |
+
+#### Phase 6 — Pipeline v2 analytique (session actuelle)
+
+- Fix couleur CNN (transmit filters), filtre de structure, sélection `own_margin`
+- **`submission_v2.pt` → 0.255 (ID 1114)** — nouveau record
+- Benchmark synthétique : plafond analytique MLP ~0.42 ; gain restant = GPU sur lisses + ViT
+
+#### Phase 7 — Suite recommandée (à faire)
+
+- Jobs `sub_vit_12k.pt` (9+11, 12000 steps) et `sub_vit9_15k.pt` (model9 seul, 15000 steps)
+  — si lancés, vérifier résultats
+- Fusionner legacy CNN invert + ViT dans base v2 (0.255)
+- GPU MLP lisses 1,4 avec garde anti-régression (`sbatch --array=1,4 slurm_array.sh`)
+
+### 6. Tableau complet des soumissions (conversation)
+
+| ID | Score | Fichier / contenu | Note |
+|---|---|---|---|
+| 273 | 0.1675 | `inv2.pt` | Ablation model2 seul |
+| 286 | 0.1711 | `inv12.pt` | Ablation model12 seul |
+| 316 | 0.2418 | `submission_all_m3_5k.pt` | CNN + m3@5k |
+| 329 | 0.239 | `submission_no6.pt` | Exclusion 6 ❌ |
+| 342 | 0.229 | `submission_no6_no7_m3_5k.pt` | Exclusion 6+7 ❌ |
+| 433 | 0.2417 | `submission_all_m3_m7_5k.pt` | m7@5k inutile |
+| 524 | 0.2367 | `sub_mlp_sel.pt` | MLP sélection ❌ |
+| 542 | 0.1997 | `sub_mlp_refine.pt` | MLP refine ❌ |
+| 599 | 0.2432 | `sub_vit.pt` | ViT 9 seul (11 bruit) |
+| 645 | 0.2469 | `sub_vit_both.pt` | ★ Best legacy |
+| 880 | 0.2033 | v2 avec clamp | Régression (clamp vs to_unit) |
+| **1114** | **0.255** | **`submission_v2.pt`** | **★ Best actuel** |
+
+Référence historique (avant conversation) : baseline analytique 0.1427 ; désastre optimize all
+0.0635.
+
+### 7. Choix stratégiques — pourquoi
+
+**Principe directeur :** minimiser les hypothèses inventées. Utiliser uniquement ce qui est
+exact dans le state_dict + le gradient fourni.
+
+| Choix | Pourquoi |
+|---|---|
+| CNN : inversion conv seule | conv exacte ; fc1/head/labels = trop d'inconnues → 0.0635 |
+| Pas de full gradient match sur CNN | Forward CNN deviné (pool/stride) |
+| Garder les 6 inversions CNN | Exclusion mesurée = baisse SSIM |
+| MLP : analytique seul (legacy) | Lignes = images ; refine dégrade SSIM (tests legacy) |
+| ViT : gradient match sur forward strict | Seule voie ; 9/11 étaient du bruit |
+| Base `submission_all_m3_5k.pt` puis `sub_vit_both.pt` | Toujours patcher par-dessus le best |
+| `mean_quality` ≠ SSIM | Ne pas décider des soumissions dessus |
+
+**Ce qui a marché**
+
+- `cnn_invert.py` — passage ~0.14 → ~0.24
+- model3 @ 5000 steps — +0.0014
+- ViT model9 — +0.0014
+- Fix model11 + optimize — +0.0037
+- Pipeline v2 (transmit + structure gate) — 0.2469 → **0.255**
+
+**Ce qui n'a pas marché**
+
+- Optimize tous modèles (CNN/ViT devinés) → 0.0635
+- MLP gradient matching (legacy, sans garde) → 0.0761 / 0.1997
+- Exclure CNN « ratés » (no6, no7)
+- Sélection MLP « own_active » sur 5,8 (legacy)
+- kmeans global (noté plus tôt)
+- `clamp(0,1)` au lieu de `to_unit()` → 0.2033
+- Overfit sur proxy local vs leaderboard
+
+### 8. Erreurs à ne pas refaire
+
+| Erreur | Conséquence | À faire à la place |
+|---|---|---|
+| Gradient match sur forward deviné (CNN/ViT cassé) | Score effondré | Vérifier `build_*` strict load avant GPU |
+| Remplacer inversion CNN par analytique | −0.003 à −0.013 | Toujours garder les 6 inversions (legacy) |
+| Refine MLP 1,4 sans garde (legacy) | −0.005 à −0.042 | `run.py --optimize` avec anti-régression, ou ne pas toucher |
+| Croire MSE local = SSIM (model6) | Mauvaise exclusion | Soumettre / ablation serveur |
+| Optimiser model7@5k sans gain | Temps GPU perdu | Mesurer avant de généraliser |
+| `sub_vit` sans fix model11 | 11 reste bruit | `inspect` + test rebuild d'abord |
+| Coller du texte terminal dans bash | syntax error | Une commande à la fois |
+| Commit consignes et `soumissions.txt` | Fuite API key | `.env` seulement |
+| Spam soumissions (< 5 min) | 429 cooldown | Attendre puis relancer `task_template.py` |
+| `clamp(0,1)` normalisation | 0.2033 vs 0.2469 | Toujours `utils.to_unit()` |
+
+### 9. Flux de données (résumé visuel)
+
+```
+CLIENT (128 images) → entraînement → gradient MOYEN par paramètre
+                                              │
+                    ┌─────────────────────────┴─────────────────────────┐
+                    ▼                         ▼                         ▼
+                 MLP net.0                  CNN fc1                    ViT
+            row = gW/gb              row = gW/gb (features)         pas d'analytique
+            = image directe          → cnn_invert(conv)            → gradient_match
+                    │                  ou v2: transmit invert           │
+                    └─────────────┬─────────────┴─────────────────────────┘
+                                  ▼
+                    submission.pt : model1..model12 × (128,3,64,64)
+                                  ▼
+                         SSIM leaderboard (matching)
+```
+
+### 10. Fichiers de soumission à retenir
+
+| Fichier | Rôle |
+|---|---|
+| **`submission_v2.pt`** | **Best actuel 0.255 — base de travail v2** |
+| `sub_vit_both.pt` | Best legacy 0.2469 — ViT 9+11 optimisés, à fusionner dans v2 |
+| `submission_all_m3_5k.pt` | CNN optimisés (sans ViT) — source CNN invert |
+| `sub_vit.pt` | Intermédiaire (9 seul) |
+| `sub_mlp_*`, `submission_no6*` | Ne pas resoumettre |
+
+**Workflow soumission :**
+
+```bash
+python submit.py --check FICHIER.pt
+cp FICHIER.pt $TASK3_DATA_ROOT/submission.pt
+cd $TASK3_DATA_ROOT && python task_template.py
+cd -
+```
+
+### 11. Commandes cluster utiles
+
+```bash
+cd /p/scratch/training2625/dougnon1/Loki/cispa_final/task_3_fl_reconstruction/attempt1
+export TASK3_DATA_ROOT=/p/scratch/training2625/dougnon1/Loki/FL_Data_Reconstruction
+source $TASK3_DATA_ROOT/.venv/bin/activate
+git pull origin main
+```
+
+**Diagnostics :**
+
+```bash
+python diagnose_mlp.py --models 1 4 5 8
+python inspect_models.py --keys 9 11
+python analyze.py --fc1-confidence   # CNN contamination
+python reconstruct_v2.py --diagnose  # v2 recoverability + previews
+```
+
+**GPU :**
+
+```bash
+sbatch slurm_cnn_invert.sh   # variables CNN_MODELS, CNN_OUT, CNN_STEPS, CNN_BASE
+sbatch slurm_mlp_refine.sh   # déconseillé (pas de garde anti-régression)
+sbatch --array=1,4 slurm_array.sh   # v2: MLP lisses avec garde (run.py --optimize)
+# ViT : run.py --optimize --allow-guessed-forward --models 9 11 --base sub_vit_both.pt
+```
+
+**Exemples CNN invert (legacy, prouvés) :**
+
+```bash
+# Affiner model7 depuis le best
+sbatch --export=ALL,CNN_MODELS="7",CNN_OUT=submission_all_m3_m7_5k.pt,CNN_STEPS=5000,CNN_BASE=submission_all_m3_5k.pt slurm_cnn_invert.sh
+
+# Rebuild sans model6
+sbatch --export=ALL,CNN_MODELS="2 3 7 10 12",CNN_OUT=submission_no6.pt,CNN_STEPS=3000,CNN_BASE=submission_analytic.pt slurm_cnn_invert.sh
+
+# Chain job (no6 + m3 5k) via --wrap
+sbatch --account=training2625 --partition=dc-gpu --reservation=cispahack \
+  --nodes=1 --gres=gpu:1 --cpus-per-task=8 --time=01:30:00 \
+  --job-name=no6_m3_5k --output=output/no6_m3_5k_%j.out \
+  --wrap='module purge; export TASK3_DATA_ROOT=/p/scratch/training2625/dougnon1/Loki/FL_Data_Reconstruction; cd /p/scratch/training2625/dougnon1/Loki/cispa_final/task_3_fl_reconstruction/attempt1; source "$TASK3_DATA_ROOT/.venv/bin/activate"; python cnn_invert.py --base submission_analytic.pt --out submission_no6_tmp.pt --models 2 7 10 12 --steps 3000; python cnn_invert.py --base submission_no6_tmp.pt --out submission_no6_m3_5k.pt --models 3 --steps 5000; python submit.py --check submission_no6_m3_5k.pt'
+```
+
+### 12. Où est le gain restant (fin de conversation)
+
+| Piste | Potentiel | Risque |
+|---|---|---|
+| **Fusionner v2 (0.255) + CNN invert legacy + ViT legacy** | **Élevé** | Faible si patch modèle par modèle |
+| ViT plus de steps / model9 seul | Moyen (+0.001–0.005) | Faible (base intacte) |
+| ViT multi-seed | Moyen | Coût GPU |
+| Fix couleur model12 (v2 CPU) | Moyen | Faible |
+| CNN re-tune (fc1 confidence, TV/lr) | Faible (plateau) | Faible |
+| MLP refine avec garde (v2) | À mesurer | Moyen |
+| Denoising cluster (v2, bench d'abord) | Moyen en régime mixte | Moyen |
+
+**Priorité immédiate :**
+
+1. Débloquer scratch (reconnexion login node)
+2. Fusionner `sub_vit_both.pt` (ViT 9+11) et CNN invert legacy dans `submission_v2.pt`
+3. Résultats jobs `sub_vit_12k.pt` / `sub_vit9_15k.pt` si lancés
+4. Fix model12 couleur (CPU)
+
+### 13. Résumé en 10 lignes
+
+1. On reconstruit 1536 images depuis gradients moyens sur 128 images et modèles connus.
+2. **Legacy :** CNN analytic fc1 → `cnn_invert` (vraie conv) = saut 0.14 → 0.24 ; ViT gradient
+   matching + fix fc_norm model11 → 0.2469.
+3. **v2 :** transmit filters + `own_margin` + structure gate → **0.255** (record actuel).
+4. MLP analytique suffit en legacy ; refine legacy dégrade ; v2 montre plafond ~0.42 en synthétique.
+5. Best actuel = **`submission_v2.pt` (0.255)** ; legacy ViT/CNN à **réintégrer** dans cette base.
+6. Ne jamais exclure un CNN inversé ni refaire full optimize all.
+7. MSE local ≠ SSIM ; le serveur garde le best → tests sans risque.
+8. Code clé legacy : `cnn_invert.py`, `fc1_analytic.py`, `rebuild.SimpleViT`, `run.py`.
+9. Code clé v2 : `reconstruct_v2.py`, `channels.py`, `separation.py`, `bench_selection.py`.
+10. Suite : fusionner legacy + v2 ; pousser ViT ; fix model12 ; GPU prudemment.
