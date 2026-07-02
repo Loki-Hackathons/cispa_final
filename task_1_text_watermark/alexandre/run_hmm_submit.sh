@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --account=training2625
-#SBATCH --partition=dc-gpu-devel
+#SBATCH --partition=dc-gpu
 #SBATCH --reservation=cispahack
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=00:45:00
+#SBATCH --time=01:00:00
 #SBATCH --job-name=task1_hmm_submit
 #SBATCH --output=logs/slurm_%j.out
 #SBATCH --error=logs/slurm_%j.err
@@ -48,7 +48,16 @@ python -u "$REPO/shared/task1_eval.py" \
   --out hmm_kgw_v1
 
 cd "$REPO"
-set -a && source .env && set +a
+if [ -f .env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+if [ -z "${CISPA_BASE_URL:-}" ] || [ -z "${CISPA_API_KEY:-}" ]; then
+  echo "ERROR: CISPA_BASE_URL / CISPA_API_KEY missing after sourcing $REPO/.env" >&2
+  exit 1
+fi
 python -u shared/submit.py \
   "$OUT/submission.jsonl" \
   --task-id 30-watermark-localization \
