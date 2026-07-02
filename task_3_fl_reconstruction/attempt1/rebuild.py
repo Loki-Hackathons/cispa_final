@@ -179,7 +179,15 @@ class SimpleViT(nn.Module):
         self.blocks = nn.ModuleList(
             [_ViTBlock(dim, num_heads, mlp_hidden) for _ in range(n_blocks)]
         )
-        self.norm = nn.LayerNorm(dim)
+        # timm exposes two mutually-exclusive final norms: `norm` (applied to
+        # the token sequence before taking the cls token) for global_pool=token,
+        # and `fc_norm` (applied AFTER mean pooling) for global_pool=avg. We
+        # instantiate whichever the state_dict provides so strict load succeeds
+        # for both variants (model9=cls+norm, model11=avg+fc_norm).
+        self.norm = nn.LayerNorm(dim) if "norm.weight" in state else nn.Identity()
+        self.fc_norm = (
+            nn.LayerNorm(dim) if "fc_norm.weight" in state else nn.Identity()
+        )
         head_w = state["head.weight"]
         self.head = nn.Linear(head_w.shape[1], head_w.shape[0])
 
@@ -194,8 +202,9 @@ class SimpleViT(nn.Module):
         h = h + self.pos_embed
         for blk in self.blocks:
             h = blk(h)
-        h = self.norm(h)
+        h = self.norm(h)                                    # Identity for avg-pool
         pooled = h[:, 0] if self.has_cls else h.mean(dim=1)
+        pooled = self.fc_norm(pooled)                       # Identity for cls-pool
         return self.head(pooled)
 
 
