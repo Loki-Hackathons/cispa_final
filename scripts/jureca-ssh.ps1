@@ -19,7 +19,9 @@ if (-not (Test-Path $GitBash)) {
 
 $SshConfig = "/c/Users/super/.ssh/config"
 $ControlPath = "/c/Users/super/.ssh/sockets/ctl-%r@%h-%p"
-$AskPass = "/c/Users/super/.ssh/askpass_totp.sh"
+$AskPass = "/c/Users/super/.ssh/askpass_totp_once.sh"
+$TotpFile = "/c/Users/super/.ssh/totp_once.txt"
+$TotpLock = "/c/Users/super/.ssh/totp_once.lock"
 $SocketsDir = "$env:USERPROFILE\.ssh\sockets"
 
 New-Item -ItemType Directory -Force -Path $SocketsDir | Out-Null
@@ -30,6 +32,10 @@ function Invoke-JurecaBash {
     $text = ($out | Out-String).Trim()
     if ($text) { Write-Output $text }
     return $LASTEXITCODE
+}
+
+function Clear-TotpOnce {
+    $null = Invoke-JurecaBash "rm -f '$TotpFile' '$TotpLock' 2>/dev/null || true"
 }
 
 function Test-JurecaMaster {
@@ -50,11 +56,16 @@ function Start-JurecaMaster {
     }
 
     Stop-JurecaMaster
+    Clear-TotpOnce
 
-    # -MNf: background master, no remote shell — most reliable on Git Bash/Windows.
     $masterCmd = @"
-export TOTP_CODE='$($env:TOTP_CODE)' SSH_ASKPASS='$AskPass' SSH_ASKPASS_REQUIRE=force DISPLAY=:0
-/usr/bin/ssh -F '$SshConfig' -o ControlMaster=yes -o ControlPath='$ControlPath' -o ControlPersist=24h -MNf jureca
+printf '%s' '$($env:TOTP_CODE)' > '$TotpFile'
+chmod +x '$AskPass'
+export SSH_ASKPASS='$AskPass' SSH_ASKPASS_REQUIRE=force DISPLAY=:0
+/usr/bin/ssh -F '$SshConfig' -o NumberOfPasswordPrompts=1 -o ControlMaster=yes -o ControlPath='$ControlPath' -o ControlPersist=24h -MNf jureca
+rc=`$?
+rm -f '$TotpFile' '$TotpLock' 2>/dev/null || true
+exit `$rc
 "@
 
     $rc = Invoke-JurecaBash $masterCmd
@@ -77,12 +88,4 @@ if (-not (Test-JurecaMaster)) {
 $escaped = $RemoteCommand -replace "'", "'\\''"
 $slaveCmd = "/usr/bin/ssh -F '$SshConfig' -o ControlMaster=no -o ControlPath='$ControlPath' jureca '$escaped'"
 $rc = Invoke-JurecaBash $slaveCmd
-
-if ($rc -ne 0) {
-    # Zombie master: kill and retry once if we still have a valid session (no re-auth).
-    if (Test-JurecaMaster) {
-        Stop-JurecaMaster
-    }
-}
-
 exit $rc
