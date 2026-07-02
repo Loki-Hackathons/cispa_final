@@ -6,10 +6,16 @@ Checklist to run before and at the start of the CISPA finals. Do Phase A now; Ph
 
 ### 1. SSH and project
 
+**JUDAC** (data access — available first):
+
 ```bash
-ssh -i ~/.ssh/id_ed25519 -o Ciphers=aes256-ctr -o MACs=hmac-sha2-256-etm@openssh.com ansart1@jureca.fz-juelich.de
-jutil env activate -p training2557
+ssh -i ~/.ssh/id_ed25519 -o Ciphers=aes256-ctr -o MACs=hmac-sha2-256-etm@openssh.com ansart1@judac.fz-juelich.de
+jutil env activate -p training2625
 ```
+
+**JURECA** (GPU — when separately granted): replace host with `jureca.fz-juelich.de`.
+
+On JuDoor → **Systems** → upload SSH key per system (judac, then jureca).
 
 - [ ] MFA works
 - [ ] `echo $PROJECT` returns a path

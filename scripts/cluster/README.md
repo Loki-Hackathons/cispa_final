@@ -2,115 +2,92 @@
 
 Official organizer guide: [`docs/Hackathon_Setup Finale.md`](../../docs/Hackathon_Setup%20Finale.md)
 
-**Important:** Finals use project **`training2625`** (not `training2557` from regional).
+**Project:** `training2625`
+
+## Systems
+
+| System | Host | Purpose |
+|--------|------|---------|
+| **JUDAC** | `judac.fz-juelich.de` | Data access, global filesystem — **no GPU** |
+| **JURECA** | `jureca.fz-juelich.de` | GPU compute via SLURM (separate grant) |
 
 Only **one person (owner)** runs `hackathon_setup.sh`. Others run `teammate.sh`.
 
-## Prerequisites (JuDoor — manual)
+## Prerequisites (JuDoor)
 
-1. Join project **`training2625`** on [JuDoor](https://judoor.fz-juelich.de) → wait for PI approval
-2. **JURECA** appears under **Systems** → sign User Agreement + upload SSH public key
+1. Project **`training2625`** approved ✅
+2. Under **Systems** → **judac**: sign User Agreement + upload SSH public key
 3. Wait ~15 min after adding SSH key
-4. SSH works with TOTP prompt (not `Permission denied (publickey)`)
+4. SSH to `judac.fz-juelich.de` → TOTP prompt (not `publickey denied`)
+5. When JURECA is granted: repeat SSH key + agreement for **jureca** system
 
-## Owner bootstrap (ansart1 — run once on JURECA)
+## Owner bootstrap (ansart1 — on JUDAC)
 
 ```bash
 ssh -i ~/.ssh/id_ed25519 \
   -o Ciphers=aes256-ctr \
   -o MACs=hmac-sha2-256-etm@openssh.com \
-  ansart1@jureca.fz-juelich.de
+  ansart1@judac.fz-juelich.de
 
 jutil env activate -p training2625
 tmux new -s hackathon
 
-# Download organizer scripts
 cd /p/scratch/training2625
 mkdir -p ansart1 && cd ansart1
 wget https://huggingface.co/datasets/SprintML/hackathon/resolve/main/hackathon_setup.sh -O hackathon_setup.sh
 wget https://huggingface.co/datasets/SprintML/hackathon/resolve/main/teammate.sh -O teammate.sh
 
-# Edit hackathon_setup.sh — use values from scripts/cluster/loki.env:
-#   OWNER=ansart1
-#   TEAMMATE_1=dougnon1
-#   TEAMMATE_2=paoli1
-#   TEAMMATE_3=abider1
-#   YOUR_FOLDER=ansart1
-#   TEAM_FOLDER=loki
-
+# Values from scripts/cluster/loki.env — or run configure_scripts.sh after cloning repo
 source hackathon_setup.sh
 ```
 
-This creates `/p/scratch/training2625/ansart1/loki/`, downloads datasets, creates per-task `.venv` folders.
-
-## Clone team repo (owner, after setup)
+## Clone team repo
 
 ```bash
-mkdir -p /p/home/jusers/ansart1/jureca/code
-cd /p/home/jusers/ansart1/jureca/code
+mkdir -p /p/home/jusers/ansart1/judac/code
+cd /p/home/jusers/ansart1/judac/code
 git clone https://github.com/Loki-Hackathons/cispa_final.git
 cd cispa_final
-git pull
+bash scripts/cluster/configure_scripts.sh   # run from directory containing the .sh files
 ```
 
-## Teammate bootstrap (dougnon1, paoli1, abider1)
+## Teammate bootstrap
 
-After owner completes setup:
+After owner completes setup — same SSH host (`judac.fz-juelich.de` until JURECA granted):
 
 ```bash
 jutil env activate -p training2625
 cd /p/scratch/training2625/ansart1
 wget https://huggingface.co/datasets/SprintML/hackathon/resolve/main/teammate.sh -O teammate.sh
-# Edit: OWNER=ansart1, TEAM_FOLDER=loki
+# OWNER=ansart1, TEAM_FOLDER=loki
 source teammate.sh
 ```
 
 ## Every new SSH session
 
 ```bash
+ssh ansart1@judac.fz-juelich.de   # or jureca when GPU access granted
 jutil env activate -p training2625
-source ~/.bashrc   # if needed
 tmux attach -t hackathon || tmux new -s hackathon
 ```
 
-## Working on a task
+## SLURM (JURECA only)
 
 ```bash
-cd /p/scratch/training2625/ansart1/loki/<dataset-name>
-source .venv/bin/activate
-python main.py
-# or: uv run main.py
-```
-
-## SLURM job (finals template)
-
-Use `slurm/templates/1gpu_finals.sh` — account `training2625`, reservation `cispahack`.
-
-```bash
-cd cispa_final
-mkdir -p logs output
 sbatch slurm/templates/1gpu_finals.sh
-squeue -u $USER
-```
-
-## Folder structure (after owner setup)
-
-```
-/p/scratch/training2625/ansart1/
-    └── loki/
-        ├── <dataset-1>/
-        │   ├── .venv/
-        │   ├── main.py
-        │   └── requirements.txt
-        ├── <dataset-2>/
-        └── output/
+squeue -A training2625
 ```
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
-| `Permission denied (publickey)` | No JURECA system access yet — wait for project approval + SSH key on JuDoor |
-| Cannot access scratch folder | Owner has not run `hackathon_setup.sh`, or wrong OWNER/TEAM_FOLDER in teammate.sh |
-| `uv not found` | `curl -LsSf https://astral.sh/uv/install.sh \| sh && source ~/.local/bin/env` |
-| Wrong project | Use **`training2625`**, not regional `training2557` |
+| `Permission denied (publickey)` | SSH key not on JuDoor for **judac** system, or wait ~15 min |
+| No GPU / sbatch fails | JURECA not granted yet — use JUDAC for data setup only |
+| Cannot access scratch | Owner has not run `hackathon_setup.sh` |
+
+## JSC contacts
+
+- Project advisor: a.herten@fz-juelich.de
+- User Services: user-services.jsc@fz-juelich.de
+- SC support: sc@fz-juelich.de

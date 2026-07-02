@@ -20,7 +20,7 @@ See full guidelines in this file — think before coding, simplicity first, surg
 
 - **Team:** Loki (Alexandre Ansart, Bastian Paoli, Florian Dougnon-Greder, Melissa Abider)
 - **Format:** 24-hour hackathon
-- **Compute:** JURECA (`jureca.fz-juelich.de`), account `training2557`
+- **Compute:** JUDAC (`judac.fz-juelich.de`, data) + JURECA (`jureca.fz-juelich.de`, GPU), account `training2625`
 
 ---
 
@@ -39,7 +39,12 @@ See full guidelines in this file — think before coding, simplicity first, surg
 
 | File | When to read |
 |------|----------------|
-| [docs/subject/subject.md](docs/subject/subject.md) | Task rules, metrics, API, datasets |
+| [docs/subject/subject.md](docs/subject/subject.md) | Task index, API, datasets |
+| [docs/subject/task_1.md](docs/subject/task_1.md) | **Task 1** — Text Watermark Localization (canonical agent spec) |
+| [docs/Task 1 Text Watermark Localization.md](docs/Task%201%20Text%20Watermark%20Localization.md) | Task 1 — full organizer write-up |
+| [docs/Task 2 Description.md](docs/Task%202%20Description.md) | Task 2 — MGI |
+| [docs/Task 3 Description.md](docs/Task%203%20Description.md) | Task 3 — FL gradient reconstruction |
+| [docs/Hackathon_Setup Finale.md](docs/Hackathon_Setup%20Finale.md) | Setup script, dataset download |
 | [docs/notes-communes.md](docs/notes-communes.md) | Live team state, SLURM jobs, decisions |
 | [docs/hackathon-start-guide.md](docs/hackathon-start-guide.md) | Day-0 checklist, W&B, smoke tests |
 | [docs/dashboard-mock-test.md](docs/dashboard-mock-test.md) | Test browser dashboard locally (Windows PowerShell) |
@@ -95,7 +100,8 @@ Module: [shared/job_progress.py](shared/job_progress.py). Skill: `job-progress`.
 
 | User asks about… | Read first |
 |------------------|------------|
-| Task rules, metric, format | `docs/subject/subject.md` |
+| Task rules, metric, format | `docs/subject/subject.md` + `docs/subject/task_*.md` |
+| Task 1 — watermark localization | `docs/subject/task_1.md` |
 | Team coordination, GPUs | `docs/notes-communes.md` |
 | Cluster setup | `docs/cluster-guide.md` |
 | Pre-hackathon checklist | `docs/hackathon-start-guide.md` |
@@ -108,7 +114,7 @@ Module: [shared/job_progress.py](shared/job_progress.py). Skill: `job-progress`.
 | Text watermarking / provenance / distillation detection | `docs/TextSeal_a_localized_llm_watermark_for_provenance_and_distillation_protection.md` |
 | Federated learning privacy / gradient reconstruction | `docs/when_the_curious_abandon_honesty_federated_learning_is_not_private.md` |
 
-When the subject is not released, use `../CISPA_Regional/` only as **pattern reference**.
+Finals specs: `docs/subject/task_*.md` and `docs/Task * Description.md`. Use `../CISPA_Regional/` only as **pattern reference** — regional task numbers differ.
 
 ### Finals required reading (organizer-assigned)
 
@@ -161,11 +167,13 @@ ssh -L 8080:localhost:8080 <user>@jureca.fz-juelich.de
 
 ### Current tasks
 
-> Update when subject is released — also edit `docs/subject/subject.md`.
+| Task | People | Title | Spec |
+|------|--------|-------|------|
+| **1** | **ansart1**, paoli1?, abider1? | Text Watermark Localization | [Task 1 Text Watermark Localization.md](docs/Task%201%20Text%20Watermark%20Localization.md) |
+| **2** | **dougnon1** | MGI | [Task 2 Description.md](docs/Task%202%20Description.md) |
+| 3 | TBD | FL gradient reconstruction | [Task 3 Description.md](docs/Task%203%20Description.md) |
 
-| Task | Owner | Directory | Metric |
-|------|-------|-----------|--------|
-| TBD  | TBD   | `task_N_<name>/attempt1/` | TBD |
+**Task 1:** score each token ∈ [0,1] for watermark-active generation in mixed docs (TextSeal, Gumbel-Max, Unigram, KGW). Keys + detectors in YAML; aggregate noisy detector signals. Dataset `SprintML/watermark_localization`; tokenizer `Qwen/Qwen2.5-7B-Instruct`. See spec for KGW CUDA gotcha.
 
 ### Cluster, SLURM, API
 

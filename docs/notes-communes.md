@@ -7,17 +7,19 @@ Live scratchpad for the team. Update during the hackathon.
 | Step | Owner | Status |
 |------|-------|--------|
 | JuDoor account | all | ansart1 ✅ MFA ✅ |
-| Join project **training2625** | all | ⏳ pending PI approval |
-| JURECA system + SSH key on JuDoor | all | ⏳ blocked until project |
-| SSH to jureca | ansart1 | ❌ publickey (no system yet) |
-| Owner `hackathon_setup.sh` | ansart1 | ⏳ after SSH |
+| Project **training2625** | ansart1 | ✅ approved |
+| **JUDAC** system (data access) | ansart1 | ✅ granted — `judac.fz-juelich.de` |
+| JUDAC: User Agreement + SSH key on JuDoor | ansart1 | ⏳ do on JuDoor → Systems → judac |
+| SSH to judac | ansart1 | ⏳ after SSH key on JUDAC (~15 min) |
+| **JURECA** system (GPU / SLURM) | all | ⏳ pending separate grant |
+| Owner `hackathon_setup.sh` | ansart1 | ⏳ after SSH to judac |
 | Teammate `teammate.sh` | others | ⏳ after owner |
 | Local dashboard mock | ansart1 | ✅ `MODE=mock`, health OK |
 | API key from organizers | team | ⏳ contact if missing |
 
-**Project ID finals:** `training2625` (see `docs/Hackathon_Setup Finale.md`). Do **not** use regional `training2557`.
+**JUDAC** = data access + global filesystem only (no GPU). **JURECA** = GPU jobs via SLURM — expect a separate JuDoor email when granted.
 
-Bootstrap guide: `scripts/cluster/README.md`
+Bootstrap guide: `scripts/cluster/README.md` · Cluster ref: `docs/cluster-guide.md`
 
 ## Subject / Tasks
 
@@ -25,24 +27,26 @@ See `docs/subject/subject.md`. Leaderboard: http://35.192.205.84/leaderboard_pag
 
 | Task | Doc | Scratch folder (after setup) |
 |------|-----|------------------------------|
-| 1 Text Watermark | `docs/Task 1 Text Watermark Localization.md` | `.../loki/<watermark-dataset>/` |
-| 2 MGI | `docs/Task 2 Description.md` | `.../loki/<mgi-dataset>/` |
-| 3 FL Reconstruction | `docs/Task 3 Description.md` | `.../loki/<fl-dataset>/` |
+| 1 Text Watermark | [Task 1 Text Watermark Localization.md](Task%201%20Text%20Watermark%20Localization.md) | `.../loki/<watermark-dataset>/` |
+| 2 MGI | [Task 2 Description.md](Task%202%20Description.md) | `.../loki/<mgi-dataset>/` |
+| 3 FL Reconstruction | [Task 3 Description.md](Task%203%20Description.md) | `.../loki/<fl-dataset>/` |
 
 ## Team assignments
 
 | Person | judoor user | Role | Task | Directory |
 |--------|-------------|------|------|-----------|
-| Alexandre | ansart1 | **Owner** (runs setup) | TBD | `task_*/attempt1/` |
-| Bastian | paoli1? | Teammate | TBD | `task_*/attempt1/` |
-| Florian | dougnon1 | Teammate | TBD | `task_*/attempt1/` |
-| Melissa | abider1? | Teammate | TBD | `task_*/attempt1/` |
+| Alexandre | ansart1 | **Owner** | **Task 1 — Text Watermark** | `task_1_text_watermark/attempt1/` |
+| Bastian | paoli1? | Teammate | **Task 1 — Text Watermark** | `task_1_text_watermark/attempt1/` |
+| Melissa | abider1? | Teammate | **Task 1 — Text Watermark** | `task_1_text_watermark/attempt1/` |
+| Florian | dougnon1 | Teammate | **Task 2 — MGI** | `task_2_mgi/attempt1/` |
+
+Task 3 (FL reconstruction): unassigned.
 
 Confirm judoor usernames for Bastian/Melissa if different.
 
 ## GPU budget
 
-Coordinate before `sbatch`. Account `training2625`, reservation `cispahack`.
+Coordinate before `sbatch`. Account `training2625`, reservation `cispahack`. Requires **JURECA** access.
 
 | Person | GPUs requested | Job name | Status |
 |--------|----------------|----------|--------|
@@ -56,7 +60,7 @@ Update before each `sbatch`. Also append to `slurm/submitted.log`.
 |------|--------|------|--------|------|---------|-----|
 | | | | | | | |
 
-Check live: `squeue -A training2625`
+Check live: `squeue -A training2625` (JURECA only)
 
 ## API / Leaderboard
 
@@ -74,4 +78,13 @@ Run browser dashboard or `python shared/dashboard.py` for cooldown status.
 
 | Time | Person | Decision |
 |------|--------|----------|
-| 2026-07-02 | Alexandre | Finals project = training2625; SSH blocked until JuDoor project + JURECA system assigned |
+| 2026-07-02 | Alexandre | JUDAC granted (`judac.fz-juelich.de`); JURECA still pending for GPU |
+| 2026-07-02 | Team | Task 1: Alexandre + Bastian + Melissa · Task 2: Florian · Task 3: TBD |
+| 2026-07-02 | Alexandre | ansart1 → Task 1 (Text Watermark Localization) |
+| 2026-07-02 | Alexandre | Finals project = training2625 |
+
+## JSC contacts (training2625)
+
+- Project advisor: Dr. Andreas Herten — a.herten@fz-juelich.de, +49 2461/61-1825
+- User Services: user-services.jsc@fz-juelich.de, +49 2461/61-5642
+- Supercomputer support: sc@fz-juelich.de, +49 2461-61-2828

@@ -1,8 +1,28 @@
-# JURECA Cluster Guide
+# JSC Cluster Guide — CISPA Grand Finals
 
-Quick reference for CISPA finals on JURECA. Extracted from regional experience and organizer docs.
+Quick reference for Team Loki on **JUDAC** (data) and **JURECA** (GPU compute).
+
+## Systems (training2625)
+
+| System | Host | Purpose | Status |
+|--------|------|---------|--------|
+| **JUDAC** | `judac.fz-juelich.de` | Login node, global filesystem, data access only — **no GPU** | Granted (2026-07-02) |
+| **JURECA** | `jureca.fz-juelich.de` | GPU compute via SLURM (A100) | Pending separate grant |
+
+On JuDoor, each system has its own entry under **Systems** — sign the User Agreement and upload your SSH key **per system**.
 
 ## SSH connection
+
+**JUDAC** (available now):
+
+```bash
+ssh -i ~/.ssh/id_ed25519 \
+  -o Ciphers=aes256-ctr \
+  -o MACs=hmac-sha2-256-etm@openssh.com \
+  ansart1@judac.fz-juelich.de
+```
+
+**JURECA** (when granted — GPU jobs):
 
 ```bash
 ssh -i ~/.ssh/id_ed25519 \
@@ -11,12 +31,14 @@ ssh -i ~/.ssh/id_ed25519 \
   ansart1@jureca.fz-juelich.de
 ```
 
-Replace `ansart1` with your judoor username. MFA (TOTP) is required.
+Replace `ansart1` with your judoor username. MFA (TOTP) is required on both.
+
+**Windows (PowerShell):** use `$env:USERPROFILE\.ssh\id_ed25519` instead of `~/.ssh/id_ed25519`.
 
 ## Project activation
 
 ```bash
-jutil env activate -p training2557
+jutil env activate -p training2625
 ```
 
 ## Module loads
@@ -42,7 +64,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 exec bash
 
 # Per-repo setup
-cd /p/home/jusers/<user>/jureca/code/cispa_final
+cd /p/home/jusers/<user>/judac/code/cispa_final
 uv venv .venv -p 3.12
 source .venv/bin/activate
 uv pip install -r shared/requirements.txt
@@ -72,7 +94,7 @@ export UV_TOOL_DIR=$PROJECT/user_dirs/$USER/uv/tools
 For debugging without SLURM:
 
 ```bash
-salloc -p dc-gpu-devel -t 20 -N 1 -A training2557
+salloc -p dc-gpu-devel -t 20 -N 1 -A training2625
 srun --pty bash -i
 module load GCC CUDA PyTorch torchvision
 source .venv/bin/activate
@@ -89,7 +111,7 @@ cp slurm/templates/2gpu_devel.sh task_1/attempt1/run.sh
 sbatch task_1/attempt1/run.sh
 
 # Monitor
-squeue -A training2557          # all team jobs
+squeue -A training2625          # all team jobs
 squeue -u ansart1               # your jobs
 scancel <job_id>                # cancel a job
 ```
@@ -143,16 +165,22 @@ wait
 
 ## Data paths
 
-Shared datasets:
+Team scratch (after `hackathon_setup.sh`):
 
 ```
-/p/project1/training2557/common/
+/p/scratch/training2625/<owner>/loki/
+```
+
+Shared project data (if available):
+
+```
+/p/project1/training2625/common/
 ```
 
 Team state file (API cooldowns, scores):
 
 ```
-/p/project1/training2557/common/team_state.json
+/p/project1/training2625/common/team_state.json
 ```
 
 ## Team folder sharing (ACLs)

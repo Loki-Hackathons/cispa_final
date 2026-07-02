@@ -1,6 +1,8 @@
 # Task 2 — Member vs Generated Inference (MGI)
 
-Official spec: `docs/Task 2 Description.md`
+**Owner:** Florian (dougnon1)
+
+Official spec: [Task 2 Description.md](../../docs/Task%202%20Description.md)
 
 After owner runs `hackathon_setup.sh`, copy or symlink templates from scratch dataset folder.
 
