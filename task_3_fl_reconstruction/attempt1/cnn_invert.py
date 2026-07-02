@@ -29,6 +29,7 @@ import torch
 import torch.nn.functional as F
 
 import config
+import fc1_analytic
 import utils
 
 
@@ -42,58 +43,32 @@ def activation(x: torch.Tensor, name: str) -> torch.Tensor:
     raise ValueError(f"unsupported CNN activation {name}")
 
 
-def analytic_feature_candidates(i: int):
+def analytic_feature_candidates(
+    i: int,
+    use_confidence: bool = True,
+    confidence_weight: float = 0.55,
+):
     """Return selected raw fc1-input feature maps for CNN model i.
 
-    Selection uses the existing visualization quality score only to pick 128
-    promising candidates. The optimization target remains the raw feature map,
-    not the normalized RGB preview.
+  By default ranks candidates with isolation confidence (fc1_analytic) plus
+  the legacy quality proxy, then dedups to 128 rows. The optimization target
+  remains the raw feature map, not the RGB preview.
     """
+    cands = fc1_analytic.extract_fc1_candidates(i)
+    idx = fc1_analytic.select_fc1_candidates(
+        cands,
+        use_confidence=use_confidence,
+        confidence_weight=confidence_weight,
+    )
     grad = utils.load_gradient(i)
-    gr = grad["gradients"]
-    gW, gb = gr["fc1.weight"], gr["fc1.bias"]
-    valid = gb.abs() > config.EPS
-    rows = gW[valid] / gb[valid].unsqueeze(1)
-    if rows.shape[0] == 0:
-        raise RuntimeError(f"model{i}: no fc1 analytic rows")
-
-    c, h, w = tuple(grad["feature_shape"])
-    if c * h * w != rows.shape[1]:
-        # Fall back to conv out-channels + square factorization.
-        c = gr["conv.weight"].shape[0]
-        h, w = utils.infer_square(rows.shape[1], c)
-        if c * h * w != rows.shape[1]:
-            raise RuntimeError(
-                f"model{i}: cannot reshape fc1 rows {rows.shape[1]} into feature map"
-            )
-
-    feats = rows.reshape(rows.shape[0], c, h, w).float()
-    preview = utils.features_to_image(rows, c, h, w)
-    scores = utils.quality_score(preview)
-
-    # Reproduce dedup_select but keep indices so raw features and previews align.
-    fp = utils._fingerprints(preview)
-    order = torch.argsort(scores, descending=True)
-    chosen, chosen_fp = [], []
-    for idx in order.tolist():
-        if len(chosen) >= config.BATCH:
-            break
-        if chosen_fp:
-            sims = torch.stack(chosen_fp) @ fp[idx]
-            if float(sims.max()) > config.DEDUP_SIM_THRESHOLD:
-                continue
-        chosen.append(idx)
-        chosen_fp.append(fp[idx])
-    if len(chosen) < config.BATCH:
-        chosen_set = set(chosen)
-        for idx in order.tolist():
-            if idx not in chosen_set:
-                chosen.append(idx)
-                chosen_set.add(idx)
-            if len(chosen) >= config.BATCH:
-                break
-    idx = torch.tensor(chosen[:config.BATCH], dtype=torch.long)
-    return grad, feats[idx], preview[idx]
+    if use_confidence:
+        rep = fc1_analytic.model_confidence_report(cands)
+        print(
+            f"model{i:2d}: fc1 conf all={rep['conf_mean_all']:.3f} "
+            f"sel={rep['conf_mean_selected']:.3f} "
+            f"high_frac={rep['conf_high_frac']:.2f}"
+        )
+    return grad, cands.feats[idx], cands.preview[idx]
 
 
 def conv_features(x: torch.Tensor, state: dict, act: str, hw: tuple[int, int]):
@@ -107,13 +82,31 @@ def conv_features(x: torch.Tensor, state: dict, act: str, hw: tuple[int, int]):
     return y
 
 
+def _tv_lr_for_shape(hw: tuple[int, int], lr: float, tv_weight: float) -> tuple[float, float]:
+    """Scale TV/lr by feature resolution (8x8 needs stronger TV, 64x64 weaker)."""
+    side = max(hw)
+    if side >= 64:
+        return lr, tv_weight * 0.35
+    if side >= 16:
+        return lr, tv_weight
+    return lr * 1.15, tv_weight * 2.5
+
+
 def invert_one_model(i: int, init: torch.Tensor, steps: int, lr: float,
-                     tv_weight: float, device: str):
-    grad, target, preview = analytic_feature_candidates(i)
+                     tv_weight: float, device: str,
+                     use_confidence: bool = True,
+                     confidence_weight: float = 0.55):
+    grad, target, preview = analytic_feature_candidates(
+        i,
+        use_confidence=use_confidence,
+        confidence_weight=confidence_weight,
+    )
     state = utils.load_state(i)
     act = grad["activation"]
     target = target.to(device)
     hw = target.shape[-2:]
+    lr, tv_weight = _tv_lr_for_shape(hw, lr, tv_weight)
+    print(f"model{i:2d}: hw={hw} lr={lr:.4f} tv={tv_weight:.2e}")
 
     if init is None:
         x = preview.clone()
@@ -159,6 +152,9 @@ def main():
     ap.add_argument("--steps", type=int, default=1500)
     ap.add_argument("--lr", type=float, default=0.08)
     ap.add_argument("--tv", type=float, default=1e-3)
+    ap.add_argument("--no-confidence", action="store_true",
+                    help="legacy selection: quality_score only")
+    ap.add_argument("--confidence-weight", type=float, default=0.55)
     args = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -177,6 +173,8 @@ def main():
         submission[f"model{i}"] = invert_one_model(
             i, init=init, steps=args.steps, lr=args.lr,
             tv_weight=args.tv, device=device,
+            use_confidence=not args.no_confidence,
+            confidence_weight=args.confidence_weight,
         )
 
     path = utils.save_submission(submission, args.out)

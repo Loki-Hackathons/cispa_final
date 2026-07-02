@@ -29,6 +29,7 @@ EPS = 1e-8
 
 # Selection heuristics.
 DEDUP_SIM_THRESHOLD = 0.92  # cosine similarity above which two imgs are "the same"
+CONFIDENCE_WEIGHT = 0.55    # blend for fc1 row selection (see fc1_analytic.py)
 
 # Optimized images replace analytic ones only if they beat them on observed-
 # gradient reproduction by at least this margin. A better gradient fit does not

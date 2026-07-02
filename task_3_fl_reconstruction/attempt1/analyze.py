@@ -24,6 +24,7 @@ import torch
 
 import config
 import extract
+import fc1_analytic
 import utils
 
 
@@ -139,16 +140,29 @@ def preview(models, select="quality", n=64):
         print(msg)
 
 
+def fc1_confidence(models=None):
+    """Print fc1 isolation confidence for CNN models (contamination detector)."""
+    if models is None:
+        models = [2, 3, 6, 7, 10, 12]
+    fc1_analytic.print_confidence_table(models)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--stats", action="store_true")
+    ap.add_argument("--fc1-confidence", action="store_true",
+                    help="fc1 row isolation scores for CNN models")
     ap.add_argument("--crosscheck", type=int, nargs="*", default=None)
     ap.add_argument("--preview", type=int, nargs="*", default=None)
     ap.add_argument("--select", choices=["quality", "kmeans"], default="quality")
     args = ap.parse_args()
 
-    if args.stats or (args.crosscheck is None and args.preview is None):
+    if args.stats or (
+        args.crosscheck is None and args.preview is None and not args.fc1_confidence
+    ):
         stats()
+    if args.fc1_confidence:
+        fc1_confidence()
     if args.crosscheck:
         crosscheck(args.crosscheck)
     if args.preview:
