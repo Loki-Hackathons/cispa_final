@@ -76,10 +76,12 @@ def extract_mlp(info: ModelInfo) -> torch.Tensor:
 def extract_cnn(info: ModelInfo) -> torch.Tensor:
     """CNN: reconstruct fc1 input (flattened conv feature map), then upscale.
 
-    conv.weight gives the conv output-channel count; fc1's in_features / that
-    count gives the spatial size. Reconstructed feature maps are spatially
-    aligned with the image for stride-1 'same' convs, so upscaling yields a
-    recognizable guess (real fidelity comes later from optimization).
+    The task's `feature_shape` (C, H, W) *is* the conv feature map fed to fc1,
+    so we use it as the authority for the reshape and only fall back to a
+    guessed square factorization if it disagrees with fc1's in_features.
+    Reconstructed feature maps are spatially aligned with the image for
+    stride-1 'same' convs, so upscaling yields a recognizable guess (real
+    fidelity comes later from optimization).
     """
     if "fc1.weight" not in info.grads or "fc1.bias" not in info.grads:
         return torch.empty(0, *config.IMG_SHAPE)
@@ -91,11 +93,17 @@ def extract_cnn(info: ModelInfo) -> torch.Tensor:
         return torch.empty(0, *config.IMG_SHAPE)
 
     conv_out_flat = gW.shape[1]
+
+    # 1) Trust feature_shape when it matches fc1's flattened input size.
+    fc, fh, fw = info.feature_shape
+    if fc * fh * fw == conv_out_flat:
+        return utils.features_to_image(rows, fc, fh, fw)
+
+    # 2) Fall back to inferring (H, W) from conv out-channels.
     conv_channels = 1
     if "conv.weight" in info.grads:
         conv_channels = info.grads["conv.weight"].shape[0]  # out channels
     hc, wc = utils.infer_square(conv_out_flat, conv_channels)
-    # Guard against rounding leaving a mismatch.
     if conv_channels * hc * wc != conv_out_flat:
         conv_channels = 1
         hc, wc = utils.infer_square(conv_out_flat, 1)

@@ -1,19 +1,52 @@
+# Secrets — never commit API keys or cluster tokens
 .env
 .env.*
 !.env.example
 task_3_fl_reconstruction/**/.env
+
+# Dashboard cluster override (see dashboard/config_local.py.example)
 dashboard/config_local.py
+
+# Python environments
 .venv/
 venv/
+
+# Python bytecode / caches
 __pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.ipynb_checkpoints/
+
+# Team ops state (local or synced from JURECA — see shared/team_state.py)
 team_state.json
+team_state.json.tmp
+
+# Submission / eval history (JSONL logs — see shared/history.py)
+history/*.jsonl
 history/submissions.jsonl
+
+# Run artifacts (attempt dirs, SLURM logs, API responses)
 logs/
 output/
+
+# ML / task outputs
 *.npz
 *.pt
+*.pkl
+wandb/
+
+# Atomic write temps (e.g. task_template submission.jsonl.tmp)
+*.tmp
+
+# OS junk
 .DS_Store
+Thumbs.db
+desktop.ini
+
+# Frontend build
 client/node_modules/
 client/dist/
 

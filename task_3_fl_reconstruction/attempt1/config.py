@@ -30,4 +30,9 @@ EPS = 1e-8
 # Selection heuristics.
 DEDUP_SIM_THRESHOLD = 0.92  # cosine similarity above which two imgs are "the same"
 
+# Optimized images replace analytic ones only if they beat them on observed-
+# gradient reproduction by at least this margin. A better gradient fit does not
+# guarantee better SSIM, so we demand a clear improvement before switching.
+SELECT_MARGIN = 0.02
+
 SEED = 1234
