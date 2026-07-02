@@ -13,3 +13,7 @@ output/
 .DS_Store
 client/node_modules/
 client/dist/
+
+# Local HF dataset clones (GB-scale) — see data/README.md
+data/*
+!data/README.md

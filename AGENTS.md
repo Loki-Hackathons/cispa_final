@@ -183,7 +183,9 @@ ssh -L 8080:localhost:8080 <user>@jureca.fz-juelich.de
 
 **Submission history — log EVERY attempt with a method note:** `submit.py`/`analyze.py` auto-log every attempt (success or failure) to `history/submissions.jsonl`. Always pass `--method "<approach>"` (and `--note` if useful) — this is the team's record of what was tried. CLI: `python shared/history.py list` / `best`. Dashboard: **Submission history** panel (filterable by kind).
 
-**Task 1 viewer:** `python shared/task1_eval.py --dataset <val.jsonl> --predictions <scores.jsonl> --method "..."` computes TPR@0.1%FPR locally and exports a token-level bundle for the dashboard's **Task 1 — Token viewer** (ground-truth underline vs our confidence heatmap). Run this before any real API submission when ground truth is available.
+**Task 1 viewer (dashboard):** `python shared/task1_eval.py --dataset <val.jsonl> --predictions <scores.jsonl> --method "..."` computes TPR@0.1%FPR locally and exports a token-level bundle for the dashboard's **Task 1 — Token viewer** (ground-truth underline vs our confidence heatmap). Run this before any real API submission when ground truth is available.
+
+**Task 1 dataset browser (local, GT only):** `data/watermark_localization/` (git clone, see `data/README.md`) + `python scripts/task1/view_dataset.py` → browse all train/val docs with watermarked spans highlighted. Separate from the dashboard viewer (which needs our predictions).
 
 See [docs/cluster-guide.md](docs/cluster-guide.md) and [README.md](README.md). API URL + `--task-id`: [docs/subject/subject.md](docs/subject/subject.md#api--leaderboard).
 
