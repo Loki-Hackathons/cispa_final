@@ -219,7 +219,10 @@ def diagnose(models: list[int], outdir: str, n_preview: int = 64) -> None:
             hi = int((conf > 0.5).sum())
             print(f"{i:>5} | {info.family:3} | {info.activation:7} | "
                   f"{n_valid:>5} | {n_clu:>8} | {hi:>7} | {transmit:>8}")
-            _save_grid(imgs[:n_preview], os.path.join(outdir, f"v2_model{i}.png"))
+            # Preview the FINAL submission tiles (structure gate applied), so the
+            # PNG matches what actually gets scored rather than the raw clusters.
+            final = separation.keep_structured_and_fill(imgs, config.BATCH)
+            _save_grid(final[:n_preview], os.path.join(outdir, f"v2_model{i}.png"))
         except Exception as e:
             print(f"{i:>5} | ERROR: {type(e).__name__}: {e}")
     print(f"\npreviews -> {outdir}/v2_model*.png "
