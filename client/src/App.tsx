@@ -37,7 +37,10 @@ function Banners({ status, error }: { status: DashboardStatus | null; error: str
       )}
       {isMock && (
         <p className="rounded-lg border border-status-pending/30 bg-status-pending/10 px-3 py-2 text-xs text-status-pending">
-          Mock data. Flip <span className="font-mono">MODE = &quot;live&quot;</span> in dashboard/config.py for the real cluster.
+          Mock data. On cluster, set{" "}
+          <span className="font-mono">MODE = &quot;live&quot;</span> in{" "}
+          <span className="font-mono">dashboard/config_local.py</span> (see{" "}
+          <span className="font-mono">config_local.py.example</span>).
         </p>
       )}
       {warnings.map((w) => (

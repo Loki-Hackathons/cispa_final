@@ -1,4 +1,5 @@
 .env
+dashboard/config_local.py
 .venv/
 venv/
 __pycache__/

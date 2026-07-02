@@ -1,0 +1,9 @@
+# Machine-local dashboard overrides (copy to config_local.py — never commit).
+# On JURECA: cp dashboard/config_local.py.example dashboard/config_local.py
+
+MODE = "live"
+
+# Optional overrides:
+# HOST = "127.0.0.1"
+# PORT = 8080
+# SLURM_PARTITION = "dc-gpu"

@@ -1,6 +1,9 @@
-"""Dashboard configuration — edit constants here before running."""
+"""Dashboard configuration — shared defaults in git; machine overrides in config_local.py."""
 
+import importlib.util
+import os
 from dataclasses import dataclass
+from pathlib import Path
 
 # mock = local dev with fixture data | live = JURECA (squeue + team_state.json)
 MODE = "mock"
@@ -20,6 +23,45 @@ COOLDOWN_SOON_SECONDS = 60
 # Leaderboard UI (external page); rows still come from team_state / mock fixtures
 LEADERBOARD_URL = "http://35.192.205.84/leaderboard_page"
 LEADERBOARD_TASK_IDS: list[str] = ["task_1", "task_2", "task_3"]
+
+_OVERRIDE_KEYS = (
+    "MODE",
+    "HOST",
+    "PORT",
+    "REFRESH_SECONDS",
+    "SLURM_ACCOUNT",
+    "SUBMIT_COOLDOWN",
+    "QUERY_COOLDOWN",
+    "GPUS_PER_NODE",
+    "SLURM_PARTITION",
+    "PROGRESS_STALE_SECONDS",
+    "SACCT_HOURS",
+    "COOLDOWN_SOON_SECONDS",
+    "LEADERBOARD_URL",
+    "LEADERBOARD_TASK_IDS",
+)
+
+
+def _apply_local_overrides() -> None:
+    local_path = Path(__file__).with_name("config_local.py")
+    if not local_path.is_file():
+        return
+    spec = importlib.util.spec_from_file_location("dashboard.config_local", local_path)
+    if spec is None or spec.loader is None:
+        return
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    g = globals()
+    for key in _OVERRIDE_KEYS:
+        if hasattr(module, key):
+            g[key] = getattr(module, key)
+
+
+_apply_local_overrides()
+
+# Env wins for mode only (handy on cluster without editing files).
+if os.environ.get("DASHBOARD_MODE"):
+    MODE = os.environ["DASHBOARD_MODE"]
 
 
 @dataclass(frozen=True)
