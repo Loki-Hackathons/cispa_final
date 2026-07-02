@@ -462,6 +462,53 @@ python submit.py --check submission.pt   # 4. validate format before uploading
 
 ---
 
+## 15b. v2 analytic pipeline (2026-07-02) — run this first
+
+New modules that fix the two biggest score leaks (score 0.24 → target >0.5). All
+CPU, seconds per model, no leaderboard needed to validate.
+
+| File | What it does |
+|------|--------------|
+| `channels.py` | Detects the CNN conv **transmit filters** (Boenisch Appendix B) and inverts them **channel-by-channel** to RGB, instead of averaging all 8 feature channels (which mixed image + noise channels). Falls back to averaging when no transmit structure exists — never regresses. |
+| `separation.py` | **Isolated-image recovery by clustering** the analytic rows. Rows that reconstruct the *same* private image are near-identical (single-image neurons); mixture rows are lone outliers. Tight/populous clusters = high-confidence reconstructions, averaged to denoise. Also `effective_rank()` to tell ReLU-leaky from smooth-dense models. `diversify_fill()` fills leftover slots with augmented variants of real reconstructions (beats white noise ≈ 0 SSIM). |
+| `reconstruct_v2.py` | Orchestrates per family + `--diagnose` mode (recoverability table + preview PNGs). MLP-ReLU rows are **clamped** (true [0,1] scale) instead of min/max-stretched → better SSIM luminance term. |
+| `selftest_v2.py` | Synthetic trap-weight MLP+CNN end-to-end check. Passes at MLP 1.00 / CNN 0.99 nearest-match SSIM. |
+
+**Step 1 — diagnose (no GPU), look at the previews:**
+
+```bash
+cd /p/scratch/training2625/dougnon1/Loki/cispa_final/task_3_fl_reconstruction/attempt1
+export TASK3_DATA_ROOT=/p/scratch/training2625/dougnon1/Loki/FL_Data_Reconstruction
+source $TASK3_DATA_ROOT/.venv/bin/activate
+
+python channels.py                       # which CNN models are transmit-trapped?
+python reconstruct_v2.py --diagnose      # per-model: valid rows / clusters / conf>.5 / transmit
+#  -> eyeball output/v2_diag/v2_model*.png : recognizable = recoverable
+```
+
+Read the table: **high `clusters` + high `conf>.5`** = strongly recoverable (submit as-is);
+low clusters = smooth/defended model (needs `mlp_reconstruct.py --refine` on GPU or stays prior-filled).
+
+**Step 2 — build + validate + submit:**
+
+```bash
+python reconstruct_v2.py --out submission_v2.pt          # all 12 (analytic++)
+python submit.py --check submission_v2.pt                # strict format check
+cp submission_v2.pt $TASK3_DATA_ROOT/submission.pt
+cd $TASK3_DATA_ROOT && python task_template.py           # SUBMIT=True (5-min cooldown)
+```
+
+**Step 3 — hard models (smooth sigmoid/tanh 1,4,2,12 and ViT 9,11), GPU:**
+warm-start exact-forward gradient matching from the v2 base, keep only if it beats
+the analytic re-sim (the anti-regression guard in `run.py`/`mlp_reconstruct.py`):
+
+```bash
+python mlp_reconstruct.py --base submission_v2.pt --out sub_refine.pt --models 1 4 --refine --steps 4000
+```
+
+**Do NOT tune steps/thresholds against leaderboard feedback** — validate with the
+`--diagnose` previews and gradient re-sim only (public split is 30%; final is the hidden 70%).
+
 ## 15. Contacts
 
 - JSC support: sc@fz-juelich.de
