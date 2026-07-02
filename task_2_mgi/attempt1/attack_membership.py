@@ -233,22 +233,25 @@ def attack_batch(tokenizer, generator, classifier, vqgan, x_orig_uint8,
         loss.backward()
         opt.step()
 
-        with torch.no_grad():
-            x_test = 0.5 * (torch.tanh(w) + 1.0)
-            adv_uint8 = tensor_to_uint8(x_test)
-            x_deploy = uint8_to_tensor(adv_uint8, device)
-            _, _, icas_dep = compute_membership_stats(
-                generator, tokenizer, x_deploy, labels)
-            icas_np = icas_dep.detach().cpu().numpy()
-            for i in range(b):
-                if icas_np[i] > best_icas[i]:
-                    best_icas[i] = icas_np[i]
-                    best_img[i] = adv_uint8[i]
-
-        if step % cfg.log_every == 0 or step == cfg.steps - 1:
+        # The deployable-icas check is a FULL extra RAR double-forward. Doing it
+        # every step doubles runtime, so only do it periodically + on the last
+        # step. icas rises ~monotonically, so periodic best-tracking is fine.
+        is_check = (step % cfg.deploy_every == 0) or (step == cfg.steps - 1)
+        if is_check:
+            with torch.no_grad():
+                x_test = 0.5 * (torch.tanh(w) + 1.0)
+                adv_uint8 = tensor_to_uint8(x_test)
+                x_deploy = uint8_to_tensor(adv_uint8, device)
+                _, _, icas_dep = compute_membership_stats(
+                    generator, tokenizer, x_deploy, labels)
+                icas_np = icas_dep.detach().cpu().numpy()
+                for i in range(b):
+                    if icas_np[i] > best_icas[i]:
+                        best_icas[i] = icas_np[i]
+                        best_img[i] = adv_uint8[i]
             print(f"    step {step:4d}  icas(soft)={icas.mean().item():+.4f}  "
-                  f"icas(deploy)={icas_np.mean():+.4f}  mse={mse.item():.5f}",
-                  flush=True)
+                  f"icas(deploy)={icas_np.mean():+.4f}  best={best_icas.mean():+.4f}  "
+                  f"mse={mse.item():.5f}", flush=True)
 
     return best_img, best_icas
 
@@ -260,11 +263,14 @@ class Cfg:
 def main() -> int:
     p = argparse.ArgumentParser(description="Gradient attack raising RAR membership (icas) for ->M")
     p.add_argument("--direction", choices=["N_M", "G_M"], required=True)
-    p.add_argument("--target-icas", type=float, default=0.5,
-                   help="Push icas up to this (member max ~0.205, G max ~0.98)")
-    p.add_argument("--steps", type=int, default=250)
-    p.add_argument("--lr", type=float, default=0.02)
-    p.add_argument("--c-mse", type=float, default=0.1, help="MSE penalty weight")
+    p.add_argument("--target-icas", type=float, default=0.8,
+                   help="Push icas up to this (member max ~0.205, G max ~0.98). "
+                        "High target => hinge keeps pushing the whole run.")
+    p.add_argument("--steps", type=int, default=400)
+    p.add_argument("--lr", type=float, default=0.05)
+    p.add_argument("--c-mse", type=float, default=0.02,
+                   help="MSE penalty weight. LOW => push icas hard (MSE has "
+                        "lots of headroom; flipping the detector is the goal)")
     p.add_argument("--temp", type=float, default=1.0, help="Soft-quant softmax temperature")
     p.add_argument("--la-weight", type=float, default=0.0,
                    help="Weight to keep autoencoder L_A natural (non-generated). 0=off")
@@ -275,6 +281,11 @@ def main() -> int:
     p.add_argument("--selftest", action="store_true",
                    help="Verify replication vs ground truth, then exit")
     p.add_argument("--log-every", type=int, default=25)
+    p.add_argument("--deploy-every", type=int, default=25,
+                   help="Steps between the expensive deployable-icas checks "
+                        "(smaller = more accurate best-tracking but ~2x slower)")
+    p.add_argument("--no-resume", action="store_true",
+                   help="Ignore existing per-batch checkpoints and recompute")
     p.add_argument("--out-dir", type=Path, default=None)
     args = p.parse_args()
 
@@ -315,16 +326,34 @@ def main() -> int:
     cfg.la_tau = args.la_tau
     cfg.la_alpha = args.la_alpha
     cfg.log_every = args.log_every
+    cfg.deploy_every = args.deploy_every
+
+    # Per-batch checkpoints so a disconnect / preemption never loses more than
+    # one batch of work. Each batch writes its adv images + icas to a .npz.
+    ckpt_dir = out_dir / "checkpoints" / args.direction
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     out = np.empty_like(refs)
     all_icas = np.empty(len(refs), dtype=np.float32)
     for start in range(0, len(refs), args.batch_size):
         chunk = refs[start:start + args.batch_size]
-        print(f"\n[{args.direction}] batch {start}..{start + len(chunk)} / {len(refs)}")
+        end = start + len(chunk)
+        ckpt = ckpt_dir / f"batch_{start:04d}.npz"
+        if not args.no_resume and ckpt.is_file():
+            data = np.load(ckpt)
+            out[start:end] = data["img"]
+            all_icas[start:end] = data["icas"]
+            print(f"[{args.direction}] batch {start}..{end} / {len(refs)} "
+                  f"-> resumed from checkpoint (best icas mean="
+                  f"{data['icas'].mean():+.4f})", flush=True)
+            continue
+
+        print(f"\n[{args.direction}] batch {start}..{end} / {len(refs)}")
         adv, icas = attack_batch(tokenizer, generator, classifier, tokenizer,
                                  chunk, device, cfg)
-        out[start:start + len(chunk)] = adv
-        all_icas[start:start + len(chunk)] = icas
+        out[start:end] = adv
+        all_icas[start:end] = icas
+        np.savez(ckpt, img=adv, icas=icas)
 
     diff = out.astype(np.float32) - refs.astype(np.float32)
     mse = float(np.mean((diff / 255.0) ** 2))
