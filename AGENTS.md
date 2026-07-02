@@ -177,6 +177,12 @@ ssh -L 8080:localhost:8080 <user>@jureca.fz-juelich.de
 
 ### Cluster, SLURM, API
 
+**Finals project: `training2625`** — SLURM account `training2625`, reservation `cispahack`. Team scratch: `/p/scratch/training2625/ansart1/loki/`.
+
+**Agent SSH policy:** the agent must SSH into JURECA itself when cluster work is needed (`ssh -i ~/.ssh/id_ed25519 -o Ciphers=aes256-ctr -o MACs=hmac-sha2-256-etm@openssh.com ansart1@jureca.fz-juelich.de`). Every connection prompts a TOTP code — **ask the user to type the 6-digit code in the terminal**, then continue. Batch commands into one-shot `ssh ... "bash -lc '...'"` calls to minimize TOTP entries. Start long work in cluster `tmux`.
+
+**Submission history:** all submits/analyses are logged to `history/submissions.jsonl` (`shared/history.py`). CLI: `python shared/history.py list`. Also visible in the dashboard History panel.
+
 See [docs/cluster-guide.md](docs/cluster-guide.md) and [README.md](README.md).
 
 ```bash

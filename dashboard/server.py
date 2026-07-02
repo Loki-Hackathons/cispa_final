@@ -1,5 +1,7 @@
 """FastAPI server for browser dashboard."""
 
+import json
+import sys
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -11,12 +13,17 @@ from dashboard.models import DashboardStatus, HealthResponse
 from dashboard.providers.live import LiveProvider
 from dashboard.providers.mock import MockProvider
 
+_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_ROOT / "shared"))
+from history import read_events  # noqa: E402
+
 config = load_config()
 provider = MockProvider(config) if config.mode == "mock" else LiveProvider(config)
 
 app = FastAPI(title="LOKI CISPA Dashboard", version="1.0.0")
 
-_CLIENT_DIST = Path(__file__).resolve().parent.parent / "client" / "dist"
+_CLIENT_DIST = _ROOT / "client" / "dist"
+_MOCK_HISTORY = Path(__file__).resolve().parent / "fixtures" / "mock_history.jsonl"
 
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -27,6 +34,19 @@ def health() -> HealthResponse:
 @app.get("/api/status", response_model=DashboardStatus)
 def status() -> DashboardStatus:
     return provider.get_status()
+
+
+@app.get("/api/history")
+def history(limit: int = 100, task_id: str | None = None, kind: str | None = None) -> list[dict]:
+    if config.mode == "mock":
+        events = [json.loads(line) for line in _MOCK_HISTORY.read_text(encoding="utf-8").splitlines() if line.strip()]
+        events.reverse()
+        if task_id:
+            events = [e for e in events if e.get("task_id") == task_id]
+        if kind:
+            events = [e for e in events if e.get("kind") == kind]
+        return events[:limit]
+    return read_events(limit=limit, task_id=task_id, kind=kind)
 
 
 def _mount_static() -> None:

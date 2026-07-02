@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from history import log_event
 from submit import get_logits
 from team_state import update_task
 
@@ -124,6 +125,8 @@ def analyze_api_npz(
         last_score=leaderboard_score,
         last_query_ts=datetime.now().isoformat(),
     )
+    log_event("analysis", task_id, score=leaderboard_score, file=submission_path,
+              owner=owner, extra={"success_rate": success_rate})
 
     return {
         "mode": "api",

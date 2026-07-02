@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from history import log_event
 from team_state import append_score, update_task
 
 SUBMIT_COOLDOWN = int(os.environ.get("CISPA_SUBMIT_COOLDOWN", "300"))   # 5 min
@@ -70,6 +71,8 @@ def get_logits(
         owner=owner or os.environ.get("USER"),
         last_query_ts=datetime.now().isoformat(),
     )
+    log_event("logits", task_id, file=query_path, owner=owner,
+              extra={"n_results": len(data.get("results", []))})
     return data
 
 
@@ -133,6 +136,9 @@ def submit_file(
         attempt=attempt,
         score_history=history,
     )
+    log_event("submit", task_id, score=score, file=file_path, owner=owner,
+              extra={"attempt": attempt, "response": {k: v for k, v in body.items()
+                                                      if k in ("score", "attempt", "message", "status")}})
     return body
 
 

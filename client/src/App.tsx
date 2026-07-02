@@ -4,6 +4,7 @@ import { ClusterPanel } from "./components/ClusterPanel";
 import { CooldownPanel } from "./components/CooldownPanel";
 import { FailedJobsPanel } from "./components/FailedJobsPanel";
 import { Header } from "./components/Header";
+import { HistoryPanel } from "./components/HistoryPanel";
 import { LeaderboardPanel } from "./components/LeaderboardPanel";
 import { NextActionsPanel } from "./components/NextActionsPanel";
 import { NodePacksPanel } from "./components/NodePacksPanel";
@@ -99,6 +100,8 @@ export default function App() {
               <LeaderboardPanel rows={data?.leaderboard ?? []} />
             </div>
           </div>
+
+          <HistoryPanel />
 
           <div className="grid gap-6 md:grid-cols-2">
             <OwnersPanel owners={data?.owners ?? []} />

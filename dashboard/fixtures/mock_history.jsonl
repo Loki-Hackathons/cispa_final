@@ -1,0 +1,7 @@
+{"ts": "2026-07-02T10:05:12", "kind": "submit", "task_id": "task_1", "owner": "ansart1", "score": 0.412356, "file": "task_1_text_watermark/attempt1/output/submission.jsonl", "extra": {"attempt": 1}}
+{"ts": "2026-07-02T10:22:40", "kind": "analysis", "task_id": "task_1", "owner": "ansart1", "score": 0.455102, "file": "task_1_text_watermark/attempt1/output/submission_v2.jsonl", "note": "entropy weighting on", "extra": {"success_rate": 45.5}}
+{"ts": "2026-07-02T10:31:07", "kind": "submit", "task_id": "task_1", "owner": "ansart1", "score": 0.455102, "file": "task_1_text_watermark/attempt1/output/submission_v2.jsonl", "extra": {"attempt": 2}}
+{"ts": "2026-07-02T11:02:33", "kind": "experiment", "task_id": "task_2", "owner": "dougnon1", "note": "PGD eps=0.03 keeps MSE < 0.001, detector flip on 41% of M->N"}
+{"ts": "2026-07-02T11:15:59", "kind": "submit", "task_id": "task_2", "owner": "dougnon1", "score": 0.312, "file": "task_2_mgi/attempt1/output/images.npz", "extra": {"attempt": 1}}
+{"ts": "2026-07-02T11:47:21", "kind": "logits", "task_id": "task_3", "owner": "paoli1", "file": "task_3_fl_reconstruction/attempt1/output/recon.pt", "extra": {"n_results": 1536}}
+{"ts": "2026-07-02T12:03:44", "kind": "submit", "task_id": "task_3", "owner": "paoli1", "score": 0.198765, "file": "task_3_fl_reconstruction/attempt1/output/recon.pt", "note": "trap-weight projection baseline", "extra": {"attempt": 1}}

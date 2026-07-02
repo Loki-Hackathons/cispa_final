@@ -4,6 +4,7 @@ venv/
 __pycache__/
 *.pyc
 team_state.json
+history/submissions.jsonl
 logs/
 output/
 *.npz

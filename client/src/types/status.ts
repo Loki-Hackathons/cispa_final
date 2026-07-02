@@ -142,3 +142,14 @@ export interface HealthResponse {
   ok: boolean;
   mode: string;
 }
+
+export interface HistoryEvent {
+  ts: string;
+  kind: string;
+  task_id: string | null;
+  owner: string | null;
+  score?: number;
+  file?: string;
+  note?: string;
+  extra?: Record<string, unknown>;
+}

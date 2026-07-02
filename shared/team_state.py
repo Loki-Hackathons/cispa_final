@@ -6,8 +6,8 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-# Cluster path when on JURECA; local fallback for dev/smoke tests
-_CLUSTER_PATH = Path("/p/project1/training2557/common/team_state.json")
+# Cluster path when on JURECA (finals team scratch); local fallback for dev
+_CLUSTER_PATH = Path("/p/scratch/training2625/ansart1/loki/team_state.json")
 _LOCAL_PATH = Path(__file__).resolve().parent.parent / "team_state.json"
 
 
