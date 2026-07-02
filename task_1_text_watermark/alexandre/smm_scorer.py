@@ -2,41 +2,65 @@
 
 Model: a document is a concatenation of segments. Each segment is either a
 single clean token (LLR = 0) or a watermarked span of length L with prior
-p(L) estimated from train (lengths are quasi-discrete: 31/47/63/95/159/320).
-Span emission LLR under a Gaussian shift model on standardized PRF signals:
+p(L). Span emissions are per-token LLR hypotheses combined with logsumexp:
 
-    LLR(s, e, scheme) = shift * sum(x[s:e]) - (e - s) * shift^2 / 2
+- "gaussian": shift model on standardized signals, l_t = shift*x_t - shift^2/2
+  (one hypothesis per shift value, replicating the original hand-tuned model)
+- "binned":   empirical LLR table fitted on labeled train spans (fit_smm.py)
+- "bernoulli": closed-form binary LLR (KGW green/red)
 
-combined over schemes/shift hypotheses with logsumexp. Forward-backward over
-segmentations gives, for every token, the exact posterior mass of "this token
-is a clean segment"; score = log-odds of being watermarked, computed stably
-in log domain (no saturation ties).
-
-Merged detections are handled natively: covering a clean gap inside a span
-costs -gap * shift^2 / 2 in LLR, so the model prefers two shorter spans.
+Forward-backward over segmentations gives, per token, the exact posterior
+mass of "this token is a clean segment"; score = watermark log-odds, stable
+in log domain (no saturation ties). All parameters live in SmmParams so the
+CV harness (cv_smm.py) can inject fold-fitted values; module defaults
+reproduce the submitted #262 pipeline exactly.
 """
 
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 
 import numpy as np
 from scipy.special import logsumexp
 
-from detectors import H0_MOMENTS, compute_signals
+from detectors import (GUMBEL_NGRAM, H0_MOMENTS, TEXTSEAL_NGRAM, _dedup_mask,
+                       compute_signals)
+
+KGW_CONTEXT = 3  # ff-anchored_minhash_prf-4 self-salt: 3 context + 1 target
 
 # empirical span-length prior (train+val counts, canonical lengths)
 CANONICAL_LENGTHS = {31: 64, 47: 133, 63: 163, 95: 145, 159: 158, 320: 73}
-OTHER_LEN_RANGE = (24, 321)   # non-canonical lengths allowed with small prior
+LEN_RANGE = (24, 321)         # span lengths considered by the model
 OTHER_LEN_MASS = 0.07         # ~7% of spans are non-canonical
-LOG_P_SPAN = np.log(0.004)    # prior prob a span starts at a given token
-# per-scheme H1 mean shift hypotheses (std units, estimated on train)
-SHIFTS = {
+DEFAULT_LOG_P_SPAN = np.log(0.004)
+DEFAULT_EDGE_PRIOR = np.log(0.02)
+DEFAULT_SHIFTS = {
     "textseal": (0.45, 0.65, 0.9),
     "gumbelmax": (0.55, 0.8, 1.1),
-    "kgw": (0.6, 0.9, 1.3),  # binary green: p1 in ~{0.5, 0.65, 0.8}
+    "kgw": (0.6, 0.9, 1.3),
 }
-EDGE_PRIOR = np.log(0.02)     # prior for truncated span at doc boundary
+
+
+@dataclass
+class Emission:
+    kind: str                         # "gaussian" | "binned" | "bernoulli"
+    shifts: tuple = ()                # gaussian
+    neutral_invalid: bool = False     # gaussian: LLR 0 (not -shift^2/2) at invalid pos
+    edges: np.ndarray | None = None   # binned: bin edges (len B+1, +-inf ends)
+    llr: np.ndarray | None = None     # binned: per-bin LLR (len B)
+    llr_green: float = 0.0            # bernoulli
+    llr_red: float = 0.0
+
+
+@dataclass
+class SmmParams:
+    lengths: np.ndarray
+    log_len_prior: np.ndarray
+    log_p_span: float
+    edge_prior: float
+    emissions: dict[str, Emission]
+    min_edge: int = 5
 
 
 def read_jsonl(path) -> list[dict]:
@@ -44,113 +68,120 @@ def read_jsonl(path) -> list[dict]:
         return [json.loads(line) for line in f if line.strip()]
 
 
-def build_length_prior() -> tuple[np.ndarray, np.ndarray]:
-    """Return (lengths, log_prior) arrays."""
-    lens, mass = [], []
+def default_length_prior() -> tuple[np.ndarray, np.ndarray]:
+    """Canonical lengths get (1 - OTHER_LEN_MASS) by count; rest uniform."""
+    lengths = np.arange(*LEN_RANGE)
     total_canon = sum(CANONICAL_LENGTHS.values())
-    other = [L for L in range(*OTHER_LEN_RANGE) if L not in CANONICAL_LENGTHS]
-    for L, c in CANONICAL_LENGTHS.items():
-        lens.append(L)
-        mass.append((1 - OTHER_LEN_MASS) * c / total_canon)
-    for L in other:
-        lens.append(L)
-        mass.append(OTHER_LEN_MASS / len(other))
-    lens = np.array(lens)
-    order = np.argsort(lens)
-    return lens[order], np.log(np.array(mass)[order])
+    n_other = len(lengths) - len(CANONICAL_LENGTHS)
+    mass = np.full(len(lengths), OTHER_LEN_MASS / n_other)
+    for i, L in enumerate(lengths):
+        if L in CANONICAL_LENGTHS:
+            mass[i] = (1 - OTHER_LEN_MASS) * CANONICAL_LENGTHS[L] / total_canon
+    return lengths, np.log(mass)
 
 
-LENGTHS, LOG_LEN_PRIOR = build_length_prior()
+def default_params() -> SmmParams:
+    lengths, log_prior = default_length_prior()
+    emissions = {name: Emission(kind="gaussian", shifts=s)
+                 for name, s in DEFAULT_SHIFTS.items()}
+    return SmmParams(lengths=lengths, log_len_prior=log_prior,
+                     log_p_span=DEFAULT_LOG_P_SPAN, edge_prior=DEFAULT_EDGE_PRIOR,
+                     emissions=emissions)
 
 
-def standardized_signals(token_ids, extra=None) -> dict[str, np.ndarray]:
-    from detectors import _dedup_mask
-
-    sigs = compute_signals(token_ids)
-    sigs.pop("unigram", None)  # unreproducible locally, adds noise only
-    if extra:
-        for name, sig in extra.items():
-            sig = np.asarray(sig, dtype=np.float64).copy()
-            if name == "kgw":
-                # KGW seeds on the 4-gram incl. target: repeated 4-grams
-                # re-emit the same mask bit -> no new evidence.
-                keep = _dedup_mask(token_ids, 3)
-                sig[~keep] = H0_MOMENTS["kgw"][0]
-            sigs[name] = sig
+def doc_signals(token_ids, extra=None) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Raw per-token signals + validity masks (first n-gram occurrence, scored pos)."""
+    ids = list(token_ids)
+    n = len(ids)
+    pos = np.arange(n)
+    sigs = compute_signals(ids)
     out = {}
-    for name, sig in sigs.items():
-        mu0, var0 = H0_MOMENTS[name]
-        out[name] = (sig - mu0) / np.sqrt(var0)
+    for name, ngram in (("textseal", TEXTSEAL_NGRAM), ("gumbelmax", GUMBEL_NGRAM)):
+        valid = _dedup_mask(ids, ngram) & (pos >= ngram)
+        out[name] = (sigs[name], valid)
+    if extra and "kgw" in extra:
+        sig = np.asarray(extra["kgw"], dtype=np.float64)
+        valid = (_dedup_mask(ids, KGW_CONTEXT) & (pos >= KGW_CONTEXT)
+                 & ((sig == 0.0) | (sig == 1.0)))
+        out["kgw"] = (sig, valid)
     return out
 
 
-def _span_llr_tables(std_sigs: dict[str, np.ndarray],
-                     shifts: dict[str, tuple] | None = None):
-    """For each start s return vector over LENGTHS of combined span LLR.
-
-    Output: dict-free matrix W[s, k] = logsumexp over (scheme, shift) of
-    LLR(s, s+LENGTHS[k]) + uniform hypothesis prior. Invalid (overrun) = -inf.
-    """
-    shifts = shifts or SHIFTS
-    n = len(next(iter(std_sigs.values())))
-    K = len(LENGTHS)
+def _token_llr_hypotheses(signals, emissions) -> list[np.ndarray]:
     hyp = []
-    for name, x in std_sigs.items():
-        prefix = np.concatenate([[0.0], np.cumsum(x)])
-        for shift in shifts.get(name, (0.6,)):
-            llr = np.full((n, K), -np.inf)
-            for k, L in enumerate(LENGTHS):
-                if L > n:
-                    continue
-                s = np.arange(0, n - L + 1)
-                llr[s, k] = shift * (prefix[s + L] - prefix[s]) - L * shift * shift / 2.0
-            hyp.append(llr)
-    n_hyp = len(hyp)
-    return logsumexp(np.stack(hyp, axis=0), axis=0) - np.log(n_hyp)
+    for name, (sig, valid) in signals.items():
+        em = emissions.get(name)
+        if em is None:
+            continue
+        if em.kind == "gaussian":
+            mu0, var0 = H0_MOMENTS[name]
+            x = np.where(valid, (sig - mu0) / np.sqrt(var0), 0.0)
+            for s in em.shifts:
+                l = s * x - 0.5 * s * s
+                if em.neutral_invalid:
+                    l = np.where(valid, l, 0.0)
+                hyp.append(l)
+        elif em.kind == "binned":
+            idx = np.clip(np.searchsorted(em.edges, sig, side="right") - 1,
+                          0, len(em.llr) - 1)
+            hyp.append(np.where(valid, em.llr[idx], 0.0))
+        elif em.kind == "bernoulli":
+            l = np.where(sig == 1.0, em.llr_green, em.llr_red)
+            hyp.append(np.where(valid, l, 0.0))
+        else:
+            raise ValueError(em.kind)
+    return hyp
 
 
-def _edge_llr(std_sigs, shifts=None):
-    """Combined LLR for truncated spans: prefix [0, e) and suffix [s, n)."""
-    shifts = shifts or SHIFTS
-    n = len(next(iter(std_sigs.values())))
-    pre_h, suf_h = [], []
-    for name, x in std_sigs.items():
-        prefix = np.concatenate([[0.0], np.cumsum(x)])
-        for shift in shifts.get(name, (0.6,)):
-            e = np.arange(n + 1)
-            pre_h.append(shift * prefix - e * shift * shift / 2.0)
-            suf_h.append(shift * (prefix[n] - prefix) - (n - e) * shift * shift / 2.0)
-    lp = logsumexp(np.stack(pre_h), axis=0) - np.log(len(pre_h))
-    ls = logsumexp(np.stack(suf_h), axis=0) - np.log(len(suf_h))
-    return lp, ls  # lp[e]: span [0,e) ; ls[s]: span [s,n)
-
-
-def score_document(token_ids, extra=None, temperature=40.0):
-    """Return per-token scores in [0,1] (monotone in watermark log-odds)."""
-    std_sigs = standardized_signals(token_ids, extra)
+def score_document(token_ids, extra=None, temperature=40.0,
+                   params: SmmParams | None = None, signals=None) -> np.ndarray:
+    """Per-token scores in [0,1], monotone in watermark log-odds."""
+    p = params or default_params()
+    if signals is None:
+        signals = doc_signals(token_ids, extra)
     n = len(token_ids)
-    W = _span_llr_tables(std_sigs)                       # (n, K)
-    lp_edge, ls_edge = _edge_llr(std_sigs)               # (n+1,), (n+1,)
-    log_p_clean = np.log1p(-np.exp(LOG_P_SPAN))
+    hyp = _token_llr_hypotheses(signals, p.emissions)
+    n_hyp = len(hyp)
+    prefixes = [np.concatenate([[0.0], np.cumsum(l)]) for l in hyp]
 
-    span_w = W + (LOG_P_SPAN + LOG_LEN_PRIOR)[None, :]   # full spans
-    min_edge = 5
+    # span LLR table W[s, k] over p.lengths, mixed over hypotheses
+    K = len(p.lengths)
+    tables = []
+    for pre in prefixes:
+        w = np.full((n, K), -np.inf)
+        for k, L in enumerate(p.lengths):
+            if L > n:
+                continue
+            s = np.arange(0, n - L + 1)
+            w[s, k] = pre[s + L] - pre[s]
+        tables.append(w)
+    W = logsumexp(np.stack(tables, axis=0), axis=0) - np.log(n_hyp)
+
+    # truncated-span LLRs: prefix [0, e) and suffix [s, n)
+    lp_edge = logsumexp(np.stack([pre for pre in prefixes]), axis=0) - np.log(n_hyp)
+    suf = np.stack([pre[n] - pre for pre in prefixes])
+    ls_edge = logsumexp(suf, axis=0) - np.log(n_hyp)
+
+    log_p_clean = np.log1p(-np.exp(p.log_p_span))
+    span_w = W + (p.log_p_span + p.log_len_prior)[None, :]
+    min_edge = p.min_edge
 
     # forward (target-side accumulation)
     alpha = np.full(n + 1, -np.inf)
     alpha[0] = 0.0
     for e in range(1, n + 1):
         terms = [alpha[e - 1] + log_p_clean]
-        starts = e - LENGTHS
+        starts = e - p.lengths
         ok = starts >= 0
         if ok.any():
             s_idx = starts[ok]
             terms.append(logsumexp(alpha[s_idx] + span_w[s_idx, np.where(ok)[0]]))
         if e >= min_edge:                                 # truncated prefix [0, e)
-            terms.append(alpha[0] + LOG_P_SPAN + EDGE_PRIOR + lp_edge[e])
+            terms.append(alpha[0] + p.log_p_span + p.edge_prior + lp_edge[e])
         if e == n:                                        # truncated suffix [s, n)
             s_ok = np.arange(0, n - min_edge + 1)
-            terms.append(logsumexp(alpha[s_ok] + LOG_P_SPAN + EDGE_PRIOR + ls_edge[s_ok]))
+            terms.append(logsumexp(alpha[s_ok] + p.log_p_span + p.edge_prior
+                                   + ls_edge[s_ok]))
         alpha[e] = logsumexp(terms)
 
     # backward
@@ -158,22 +189,22 @@ def score_document(token_ids, extra=None, temperature=40.0):
     beta[n] = 0.0
     for s in range(n - 1, -1, -1):
         terms = [beta[s + 1] + log_p_clean]
-        ends = s + LENGTHS
+        ends = s + p.lengths
         ok = ends <= n
         if ok.any():
             e_idx = ends[ok]
             terms.append(logsumexp(beta[e_idx] + span_w[s, np.where(ok)[0]]))
         if s == 0:
             e_ok = np.arange(min_edge, n + 1)
-            terms.append(logsumexp(beta[e_ok] + LOG_P_SPAN + EDGE_PRIOR + lp_edge[e_ok]))
+            terms.append(logsumexp(beta[e_ok] + p.log_p_span + p.edge_prior
+                                   + lp_edge[e_ok]))
         if s <= n - min_edge:
-            terms.append(beta[n] + LOG_P_SPAN + EDGE_PRIOR + ls_edge[s])
+            terms.append(beta[n] + p.log_p_span + p.edge_prior + ls_edge[s])
         beta[s] = logsumexp(terms)
 
     log_z = alpha[n]
     # exact clean mass per token: token t is clean segment [t, t+1)
     log_m_clean = alpha[:n] + log_p_clean + beta[1:] - log_z
     log_m_clean = np.minimum(log_m_clean, -1e-12)
-    # log-odds wm vs clean, stable at both ends
     log_odds = np.log1p(-np.exp(log_m_clean)) - log_m_clean
     return 1.0 / (1.0 + np.exp(-log_odds / temperature))

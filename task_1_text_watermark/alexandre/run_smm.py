@@ -22,11 +22,11 @@ from smm_scorer import read_jsonl, score_document
 DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "watermark_localization"
 
 
-def load_kgw(path: str | None) -> dict[int, np.ndarray] | None:
+def load_kgw(path: str | None) -> dict[str, np.ndarray] | None:
     if not path:
         return None
     npz = np.load(path)
-    return {int(k): npz[k].astype(np.float64) for k in npz.files}
+    return {k: npz[k].astype(np.float64) for k in npz.files}
 
 
 def main() -> None:
@@ -46,10 +46,8 @@ def main() -> None:
         for i, rec in enumerate(records):
             doc_id = rec["document_id"]
             extra = None
-            if kgw is not None:
-                key = int(doc_id) if not isinstance(doc_id, int) else doc_id
-                if key in kgw:
-                    extra = {"kgw": kgw[key]}
+            if kgw is not None and doc_id in kgw:
+                extra = {"kgw": kgw[doc_id]}
             scores = score_document(rec["token_ids"], extra=extra)
             f.write(json.dumps({"document_id": doc_id,
                                 "scores": [float(s) for s in scores]}) + "\n")
