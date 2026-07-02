@@ -18,13 +18,17 @@
 # Submit:  sbatch slurm_run.sh
 set -euo pipefail
 
-module load GCC CUDA PyTorch torchvision
+# Do NOT `module load PyTorch` here: it conflicts with the task .venv torch
+# (ImportError: loaded torch/_C folder instead of C extensions).
+module purge
 
 export TASK3_DATA_ROOT=/p/scratch/training2625/dougnon1/Loki/FL_Data_Reconstruction
 cd /p/scratch/training2625/dougnon1/Loki/cispa_final/task_3_fl_reconstruction/attempt1
 source "$TASK3_DATA_ROOT/.venv/bin/activate"
 
 mkdir -p output
+
+python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
 
 # Analytic pass over everything, then optimize the hard MLP models.
 python run.py --out submission.pt
