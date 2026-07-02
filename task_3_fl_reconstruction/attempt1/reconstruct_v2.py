@@ -61,12 +61,12 @@ def _cnn_to_rgb(i: int, feature_shape: tuple[int, int, int]):
 
     def f(rows: torch.Tensor) -> torch.Tensor:
         feats = rows.reshape(rows.shape[0], c, h, w)
-        # Only trust exact per-channel transmit inversion for NEAR-PERFECT
-        # transmit (delta>=0.9: models 6,12). Partial-transmit models (2,7,10)
-        # fall back to the baseline channel-averaging, which is safer than
-        # inverting a contaminated single tap.
-        rgb, _ = channels.transmit_features_to_rgb(
-            feats, conv_w, conv_b, act, min_delta=0.9)
+        # Use per-channel transmit inversion whenever the conv is detected as a
+        # transmit conv (default min_delta=0.55): the previews showed partial
+        # transmit (models 2,7,10: delta 0.6-0.8) recovers proper RGB, while the
+        # 8-channel averaging fallback washed everything red. Non-transmit convs
+        # (model 3) fall back to GRAYSCALE inside transmit_features_to_rgb.
+        rgb, _ = channels.transmit_features_to_rgb(feats, conv_w, conv_b, act)
         return rgb
     return f
 
@@ -95,7 +95,7 @@ def recover_mlp(i: int, info: extract.ModelInfo):
         sim_threshold=0.90, own_active=own_active, row_priority=margin,
     )
     method = f"cluster+margin({info.activation}):{imgs.shape[0]}"
-    out = separation.diversify_fill(imgs, config.BATCH)
+    out = separation.keep_structured_and_fill(imgs, config.BATCH)
     return out, method
 
 
@@ -133,7 +133,7 @@ def recover_cnn(i: int, info: extract.ModelInfo):
     tag = "transmit" if tm.is_transmit() else "avg"
     method = f"cluster+margin/{tag}({info.activation}):{imgs.shape[0]}"
 
-    out = separation.diversify_fill(imgs, config.BATCH)
+    out = separation.keep_structured_and_fill(imgs, config.BATCH)
     return out, method
 
 

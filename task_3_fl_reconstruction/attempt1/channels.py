@@ -147,9 +147,16 @@ def transmit_features_to_rgb(
     conv_b = conv_b.detach().float() if conv_b is not None else torch.zeros(cout)
 
     if not tm.is_transmit(min_delta) or tm.in_channels != 3:
-        # Defended / non-trap model: keep the old robust behaviour.
-        rows = feats.reshape(n, cout * h * w)
-        return utils.features_to_image(rows, cout, h, w), False
+        # Defended / non-trap model: no reliable channel mapping. Collapse to
+        # GRAYSCALE (mean over feature channels) instead of chunk-averaging into
+        # RGB, which invented false colour casts (models were tinted red). A
+        # correct-luminance gray face scores better SSIM than a miscoloured one.
+        gray = feats.mean(dim=1, keepdim=True)           # (N,1,H,W)
+        rgb = gray.repeat(1, 3, 1, 1)
+        if (h, w) != (64, 64):
+            rgb = F.interpolate(rgb, size=(64, 64), mode="bilinear",
+                                align_corners=False)
+        return utils.to_unit(rgb).float(), False
 
     chans = []
     for c in range(3):

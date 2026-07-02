@@ -200,6 +200,59 @@ def effective_rank(gW: torch.Tensor, energy: float = 0.999) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# Structure gate: tell real reconstructions from noise rows (no ground truth).
+# --------------------------------------------------------------------------- #
+@torch.no_grad()
+def structure_score(imgs: torch.Tensor) -> torch.Tensor:
+    """Fraction of image energy in low frequencies, in ~[0,1] (higher = real).
+
+    Natural images (faces) are low-frequency dominant; analytic 'noise' rows
+    (dead neurons / cancellations) look like white noise with a flat spectrum.
+    We blur each image and measure how much of its (mean-subtracted) energy the
+    blur retains: faces keep most of it, noise loses it.  Pure label-free proxy.
+    """
+    n = imgs.shape[0]
+    g = imgs.mean(dim=1, keepdim=True)                    # (N,1,H,W) grayscale
+    g = g - g.mean(dim=(2, 3), keepdim=True)
+    blur = F.avg_pool2d(g, kernel_size=8, stride=8)       # 64->8 low-freq
+    blur = F.interpolate(blur, size=g.shape[-2:], mode="bilinear",
+                         align_corners=False)
+    num = (blur.reshape(n, -1) ** 2).sum(dim=1)
+    den = (g.reshape(n, -1) ** 2).sum(dim=1).clamp_min(1e-12)
+    return (num / den).clamp(0, 1)
+
+
+@torch.no_grad()
+def keep_structured_and_fill(imgs: torch.Tensor, k: int = config.BATCH,
+                             seed: int = config.SEED) -> torch.Tensor:
+    """Drop noise-like tiles, then fill to k with augmented real reconstructions.
+
+    The matched-SSIM metric pairs each of our k images with a DISTINCT ground
+    truth.  A pure-noise tile matches any GT face at ~0, so replacing it with a
+    varied real-face reconstruction (which matches some still-unmatched GT face
+    at a moderate SSIM) is almost always a gain.  We keep tiles whose structure
+    score clears an adaptive cut (bimodal face-vs-noise split) and pad the rest
+    with `diversify_fill` variants of the kept faces.
+    """
+    n = imgs.shape[0]
+    if n == 0:
+        return diversify_fill(imgs, k, seed)
+    s = structure_score(imgs)
+    hi = float(s.max())
+    if hi < 1e-6:
+        return diversify_fill(imgs, k, seed)
+    # Adaptive cut: 45% of the best tile's structure. Bimodal in practice
+    # (faces ~0.6-0.9, noise ~0.05-0.2), so the exact fraction is not sensitive.
+    cut = 0.45 * hi
+    keep_mask = s >= cut
+    kept = imgs[keep_mask]
+    if kept.shape[0] == 0:
+        kept = imgs[torch.argsort(s, descending=True)[: max(1, k // 4)]]
+    # Preserve incoming order (already confidence-sorted) among kept tiles.
+    return diversify_fill(kept, k, seed)
+
+
+# --------------------------------------------------------------------------- #
 # Fill helpers: diverse plausible priors beat white noise for leftover slots.
 # --------------------------------------------------------------------------- #
 @torch.no_grad()
