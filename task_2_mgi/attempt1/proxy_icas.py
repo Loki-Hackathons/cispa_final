@@ -106,36 +106,65 @@ def predict_imagenet_class(
     return logits.argmax(dim=1)
 
 
+def _rar_token_logits(generator, codes_flat: torch.Tensor, condition_ids: torch.Tensor) -> torch.Tensor:
+    """RAR next-token logits aligned to predict each of the T image tokens.
+
+    ``condition_ids`` must already be in RAR's shifted token space (use
+    ``preprocess_condition`` for a class, ``get_none_condition`` for null).
+    RAR prepends the condition token, so the first T output positions predict
+    the T image tokens.
+    """
+    seq_len = codes_flat.shape[1]
+    logits = generator.forward(codes_flat, condition_ids)  # (B, T+1, codebook_size)
+    return logits[:, :seq_len, :]
+
+
+def compute_membership_stats(
+    generator,
+    tokenizer,
+    images_bchw: torch.Tensor,
+    class_labels: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Correct RAR membership signals for a batch of images.
+
+    Returns (nll_cond, nll_uncond, icas) each shape (B,):
+      * nll_cond   : conditional negative log-likelihood of the image tokens.
+                     LOWER => the model finds the image more likely => more
+                     "member"-like for a class-conditional AR model.
+      * nll_uncond : unconditional NLL (null class token).
+      * icas       : nll_uncond - nll_cond (conditional likelihood discrepancy);
+                     HIGHER => stronger class attribution / membership.
+    """
+    device = images_bchw.device
+    b = images_bchw.shape[0]
+
+    with torch.no_grad():
+        codes = tokenizer.encode(images_bchw)
+    codes_flat = codes.view(b, -1).long().to(device)
+
+    labels = class_labels.view(b, 1).long().to(device)
+    cond_ids = generator.preprocess_condition(labels.clone(), cond_drop_prob=0.0)
+    none_ids = generator.get_none_condition(cond_ids)
+
+    cond_logits = _rar_token_logits(generator, codes_flat, cond_ids)
+    uncond_logits = _rar_token_logits(generator, codes_flat, none_ids)
+
+    log_p_cond = F.log_softmax(cond_logits, dim=-1)
+    log_p_uncond = F.log_softmax(uncond_logits, dim=-1)
+    nll_cond = -log_p_cond.gather(-1, codes_flat.unsqueeze(-1)).squeeze(-1).mean(dim=1)
+    nll_uncond = -log_p_uncond.gather(-1, codes_flat.unsqueeze(-1)).squeeze(-1).mean(dim=1)
+    return nll_cond, nll_uncond, nll_uncond - nll_cond
+
+
 def compute_icas_score(
     generator,
     tokenizer,
     images_bchw: torch.Tensor,
     class_labels: torch.Tensor,
 ) -> torch.Tensor:
-    """
-    Simplified ICAS-style score: conditional log-prob minus unconditional.
-
-    Higher score => more likely member (trained on similar conditional).
-    This is a proxy — jury detector may differ.
-    """
-    device = images_bchw.device
-    b = images_bchw.shape[0]
-
-    # Encode to discrete tokens via tokenizer (no grad through encode in v1 ICAS eval)
-    with torch.no_grad():
-        codes = tokenizer.encode(images_bchw)
-
-    cond = class_labels.long().to(device)
-    cond_logits = generator.forward(codes, condition=cond, cond_drop_prob=0.0)
-    uncond_logits = generator.forward(codes, condition=cond, cond_drop_prob=1.0)
-
-    # Token NLL under conditional vs unconditional
-    log_p_cond = F.log_softmax(cond_logits, dim=-1)
-    log_p_uncond = F.log_softmax(uncond_logits, dim=-1)
-    target = codes.view(b, -1)
-    nll_cond = -log_p_cond.gather(-1, target.unsqueeze(-1)).squeeze(-1).mean(dim=1)
-    nll_uncond = -log_p_uncond.gather(-1, target.unsqueeze(-1)).squeeze(-1).mean(dim=1)
-    return nll_uncond - nll_cond
+    """ICAS = conditional-likelihood discrepancy. Higher => more member-like."""
+    _, _, icas = compute_membership_stats(generator, tokenizer, images_bchw, class_labels)
+    return icas
 
 
 def build_icas_attack_targets(direction: str) -> str:

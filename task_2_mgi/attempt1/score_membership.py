@@ -48,7 +48,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 from config import CLASS_SIZE, PathsConfig, setup_oned_tokenizer_path  # noqa: E402
 from proxy_dcb import load_vqgan, uint8_to_tensor  # noqa: E402
 from proxy_icas import (  # noqa: E402
-    compute_icas_score,
+    compute_membership_stats,
     load_class_predictor,
     load_rar_generator,
     predict_imagenet_class,
@@ -60,20 +60,71 @@ CLASS_RANGES = {"M": (0, CLASS_SIZE), "N": (CLASS_SIZE, 2 * CLASS_SIZE),
 
 
 @torch.no_grad()
+def score_set(
+    generator, tokenizer, classifier, images_uint8: np.ndarray,
+    device: str, batch_size: int, tag: str = "",
+) -> dict[str, np.ndarray]:
+    """Return correct RAR membership signals (nll_cond, nll_uncond, icas)."""
+    n = len(images_uint8)
+    nll_c = np.empty(n, dtype=np.float32)
+    nll_u = np.empty(n, dtype=np.float32)
+    icas = np.empty(n, dtype=np.float32)
+    for start in range(0, n, batch_size):
+        chunk = images_uint8[start:start + batch_size]
+        x = uint8_to_tensor(chunk, device)
+        labels = predict_imagenet_class(x, classifier)
+        c, u, i = compute_membership_stats(generator, tokenizer, x, labels)
+        sl = slice(start, start + len(chunk))
+        nll_c[sl] = c.detach().cpu().numpy()
+        nll_u[sl] = u.detach().cpu().numpy()
+        icas[sl] = i.detach().cpu().numpy()
+        print(f"  scored {tag} {start + len(chunk)}/{n}", flush=True)
+    return {"nll_cond": nll_c, "nll_uncond": nll_u, "icas": icas}
+
+
 def membership_scores(
     generator, tokenizer, classifier, members_uint8: np.ndarray,
     device: str, batch_size: int,
 ) -> np.ndarray:
     """Higher score = more strongly memorised (more 'member')."""
-    scores = np.empty(len(members_uint8), dtype=np.float32)
-    for start in range(0, len(members_uint8), batch_size):
-        chunk = members_uint8[start:start + batch_size]
-        x = uint8_to_tensor(chunk, device)
-        labels = predict_imagenet_class(x, classifier)
-        icas = compute_icas_score(generator, tokenizer, x, labels)
-        scores[start:start + len(chunk)] = icas.detach().cpu().numpy()
-        print(f"  scored members {start + len(chunk)}/{len(members_uint8)}", flush=True)
-    return scores
+    return score_set(generator, tokenizer, classifier, members_uint8,
+                     device, batch_size, tag="members")["icas"]
+
+
+def _fmt(a: np.ndarray) -> str:
+    return (f"mean={a.mean():+.4f} std={a.std():.4f} "
+            f"min={a.min():+.4f} max={a.max():+.4f}")
+
+
+def run_diagnose(generator, tokenizer, classifier, originals, device, batch_size) -> None:
+    """FREE diagnostic: does RAR likelihood separate members (M) from N and G?
+
+    If members have clearly LOWER nll_cond (or HIGHER icas) than N, the
+    membership signal is real and a '->M' attack has a concrete target.
+    """
+    sets = {}
+    for cls, (a, b) in CLASS_RANGES.items():
+        print(f"\nScoring set {cls} ...")
+        sets[cls] = score_set(generator, tokenizer, classifier,
+                               originals[a:b], device, batch_size, tag=cls)
+
+    print("\n================ MEMBERSHIP DIAGNOSTIC ================")
+    for signal in ("nll_cond", "icas"):
+        print(f"\n[{signal}]  (member goal: "
+              f"{'LOW nll_cond' if signal == 'nll_cond' else 'HIGH icas'})")
+        for cls in ("M", "N", "G"):
+            print(f"  {cls}: {_fmt(sets[cls][signal])}")
+
+    # Separation of members (M) vs non-members (N) on the membership signal.
+    m_icas, n_icas = sets["M"]["icas"], sets["N"]["icas"]
+    thr = float(np.median(np.concatenate([m_icas, n_icas])))
+    tpr = float((m_icas > thr).mean())
+    fpr = float((n_icas > thr).mean())
+    print("\n[icas] median-threshold separability M vs N:")
+    print(f"  threshold={thr:+.4f}  TPR(M>thr)={tpr:.3f}  FPR(N>thr)={fpr:.3f}")
+    print("  -> if TPR >> FPR, membership signal is real; an attack that raises")
+    print("     icas above the M-set max can plausibly flip N/G into M.")
+    print(f"  M-set icas max = {m_icas.max():+.4f}  (attack target: exceed this)")
 
 
 def build_member_block(
@@ -98,6 +149,9 @@ def main() -> int:
                         "(1 = single strongest everywhere; larger = lower MSE)")
     p.add_argument("--batch-size", type=int, default=8)
     p.add_argument("--out-dir", type=Path, default=None)
+    p.add_argument("--diagnose", action="store_true",
+                   help="FREE: score M/N/G sets and report if RAR likelihood "
+                        "separates members from non-members (no blocks written)")
     args = p.parse_args()
 
     paths = PathsConfig()
@@ -119,6 +173,10 @@ def main() -> int:
     tokenizer = load_vqgan(paths.tokenizer_ckpt, device=device)
     generator, _ = load_rar_generator(tokenizer_ckpt=paths.tokenizer_ckpt, device=device)
     classifier = load_class_predictor(device=device)
+
+    if args.diagnose:
+        run_diagnose(generator, tokenizer, classifier, originals, device, args.batch_size)
+        return 0
 
     print("Scoring membership strength of the 300 member images...")
     scores = membership_scores(generator, tokenizer, classifier, members, device, args.batch_size)
