@@ -131,9 +131,33 @@ def unigram_signal(token_ids: list[int], vocab_size: int = 151643) -> np.ndarray
     return out
 
 
-def compute_signals(token_ids: list[int], unigram_vocab_size: int = 151643) -> dict[str, np.ndarray]:
-    return {
+def _dedup_mask(token_ids: list[int], ngram: int) -> np.ndarray:
+    """True where the (context, target) n-gram is seen for the first time.
+
+    Repeated n-grams re-emit the exact same PRF draw, so they carry no new
+    evidence; counting them inflates window z-scores on repetitive text.
+    """
+    n = len(token_ids)
+    keep = np.ones(n, dtype=bool)
+    seen = set()
+    for i in range(ngram, n):
+        key = tuple(token_ids[i - ngram:i + 1])
+        if key in seen:
+            keep[i] = False
+        else:
+            seen.add(key)
+    return keep
+
+
+def compute_signals(token_ids: list[int], unigram_vocab_size: int = 151643,
+                    dedup: bool = True) -> dict[str, np.ndarray]:
+    sigs = {
         "textseal": textseal_signal(token_ids),
         "gumbelmax": gumbelmax_signal(token_ids),
         "unigram": unigram_signal(token_ids, unigram_vocab_size),
     }
+    if dedup:
+        for name, ngram in [("textseal", TEXTSEAL_NGRAM), ("gumbelmax", GUMBEL_NGRAM)]:
+            keep = _dedup_mask(token_ids, ngram)
+            sigs[name][~keep] = H0_MOMENTS[name][0]
+    return sigs
