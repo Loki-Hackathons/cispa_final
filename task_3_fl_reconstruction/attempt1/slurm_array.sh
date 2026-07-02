@@ -30,10 +30,10 @@ source "$TASK3_DATA_ROOT/.venv/bin/activate"
 mkdir -p output/parts
 
 M="$SLURM_ARRAY_TASK_ID"
-STEPS=4000
-# ViT models are deeper/slower to converge -> give them more iterations.
-if [ "$M" -eq 9 ] || [ "$M" -eq 11 ]; then STEPS=6000; fi
 
 python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
-python run.py --optimize --models "$M" --steps "$STEPS" --save-part output/parts
+# --optimize only affects MLP (exact forward); CNN/ViT fall back to analytic
+# inside run.py, so this is safe to run for every model. Optimizing CNN/ViT
+# against guessed forwards regressed the leaderboard (0.1427 -> 0.0635).
+python run.py --optimize --models "$M" --steps 4000 --save-part output/parts
 echo "model $M done"

@@ -55,7 +55,8 @@ def _optimize(i, grad, info, init, steps):
     return imgs, model, labels
 
 
-def reconstruct_model(i: int, use_opt: bool, steps: int) -> tuple[torch.Tensor, str]:
+def reconstruct_model(i: int, use_opt: bool, steps: int,
+                      allow_guessed: bool = False) -> tuple[torch.Tensor, str]:
     grad = utils.load_gradient(i)
     info = extract.introspect(i, grad)
 
@@ -70,14 +71,27 @@ def reconstruct_model(i: int, use_opt: bool, steps: int) -> tuple[torch.Tensor, 
 
     imgs = analytic_imgs
 
-    if use_opt:
+    # Only families whose forward we rebuild EXACTLY (strict state_dict) are
+    # safe to optimize: gradient matching against a *guessed* forward (our CNN
+    # pooling/padding and ViT assumptions) produced images that fit a fake
+    # gradient and destroyed good analytic reconstructions (leaderboard
+    # 0.1427 -> 0.0635). CNN/ViT therefore stay on analytic unless explicitly
+    # forced for experimentation.
+    EXACT_FORWARD = {"mlp"}
+    can_opt = use_opt and (info.family in EXACT_FORWARD or allow_guessed)
+
+    if use_opt and not can_opt:
+        print(f"  [run] model{i}: optimize skipped "
+              f"(no exact forward for '{info.family}'; keeping analytic)")
+
+    if can_opt:
         try:
-            # Warm-start from the deduped top-128 analytic images when we have
-            # them (better than raw candidate order); ViT starts from noise.
             init = analytic_imgs if analytic_imgs is not None else None
             opt_imgs, model, labels = _optimize(i, grad, info, init, steps)
 
             # Anti-regression selection via observed-gradient reproduction.
+            # Require a real margin so we never trade a good analytic image for
+            # a marginally-better gradient fit (which need not be better SSIM).
             if analytic_imgs is not None:
                 d_analytic = rebuild.resim_distance(
                     model, analytic_imgs, labels, grad["gradients"])
@@ -85,7 +99,7 @@ def reconstruct_model(i: int, use_opt: bool, steps: int) -> tuple[torch.Tensor, 
                     model, opt_imgs, labels, grad["gradients"])
                 print(f"  [select] model{i}: analytic={d_analytic:.4f} "
                       f"optimized={d_opt:.4f}")
-                if d_opt <= d_analytic:
+                if d_opt < d_analytic - config.SELECT_MARGIN:
                     imgs, method = opt_imgs, f"optimize({info.family},{steps})"
                 else:
                     imgs, method = analytic_imgs, f"analytic({info.tier})+kept"
@@ -114,6 +128,9 @@ def main():
                     help="existing submission.pt to update in place")
     ap.add_argument("--save-part", type=str, default=None,
                     help="dir to write per-model tensors model{i}.pt (array jobs)")
+    ap.add_argument("--allow-guessed-forward", action="store_true",
+                    help="EXPERIMENTAL: also optimize CNN/ViT with our guessed "
+                         "forward models (risky: broke leaderboard 0.1427->0.0635)")
     args = ap.parse_args()
 
     torch.manual_seed(config.SEED)
@@ -129,7 +146,8 @@ def main():
         os.makedirs(args.save_part, exist_ok=True)
 
     for i in args.models:
-        imgs, _ = reconstruct_model(i, args.optimize, args.steps)
+        imgs, _ = reconstruct_model(i, args.optimize, args.steps,
+                                    allow_guessed=args.allow_guessed_forward)
         submission[f"model{i}"] = imgs
         if args.save_part:
             part = os.path.join(args.save_part, f"model{i}.pt")
