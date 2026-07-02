@@ -1,4 +1,7 @@
 .env
+.env.*
+!.env.example
+task_3_fl_reconstruction/**/.env
 dashboard/config_local.py
 .venv/
 venv/
