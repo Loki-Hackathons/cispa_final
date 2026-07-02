@@ -32,6 +32,10 @@ if [ -f "$SCRATCH_VENV/bin/activate" ]; then
   source "$SCRATCH_VENV/bin/activate"
 fi
 
+# Use the module's CUDA-enabled PyTorch, not the venv's CPU-only build.
+# (Same pattern as alexandre: torch/torchvision come from `module load`, not pip.)
+pip uninstall -y torch torchvision torchaudio 2>/dev/null || true
+
 export WML_DATASET_DIR="$DATA"
 export WML_WATERMARK_YAML="$DATA/watermark_config.yaml"
 export PYTHONPATH="$REPO:$PYTHONPATH"
