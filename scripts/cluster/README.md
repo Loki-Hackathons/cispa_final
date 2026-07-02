@@ -46,9 +46,10 @@ source hackathon_setup.sh
 ```bash
 mkdir -p /p/home/jusers/ansart1/judac/code
 cd /p/home/jusers/ansart1/judac/code
-git clone https://github.com/Loki-Hackathons/cispa_final.git
+git clone --recurse-submodules https://github.com/Loki-Hackathons/cispa_final.git
 cd cispa_final
 bash scripts/cluster/configure_scripts.sh   # run from directory containing the .sh files
+bash scripts/task1/sync_watermark_repos.sh    # pin Task 1 detector submodules
 ```
 
 ## Teammate bootstrap

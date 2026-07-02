@@ -75,7 +75,7 @@ Run browser dashboard or `python shared/dashboard.py` for cooldown status.
 | 2026-07-02 | Alexandre | JUDAC granted (`judac.fz-juelich.de`); JURECA still pending for GPU |
 | 2026-07-02 | Team | Task 1: Alexandre + Bastian + Melissa · Task 2: Florian · Task 3: TBD |
 | 2026-07-02 | Alexandre | ansart1 → Task 1 (Text Watermark Localization) |
-| 2026-07-02 | Alexandre | Finals project = training2625 |
+| 2026-07-02 | Alexandre | Task 1 vendor submodules pinned (textseal, lm-watermarking, unigram) + `watermark_config.yaml` in repo |
 
 ## JSC contacts (training2625)
 

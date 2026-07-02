@@ -29,7 +29,17 @@ export function LeaderboardPanel({ rows }: LeaderboardPanelProps) {
     <Card>
       <CardHeader>
         <CardTitle>Leaderboard</CardTitle>
-        <CardDescription>Set LEADERBOARD_URL in dashboard/config.py when the API is live.</CardDescription>
+        <CardDescription>
+          Team ranks from dashboard state ·{" "}
+          <a
+            href="http://35.192.205.84/leaderboard_page"
+            className="text-primary underline-offset-2 hover:underline"
+            target="_blank"
+            rel="noreferrer"
+          >
+            full leaderboard
+          </a>
+        </CardDescription>
       </CardHeader>
       <CardContent className="px-0">
         <Table>

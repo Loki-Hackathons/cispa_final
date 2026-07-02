@@ -1,0 +1,74 @@
+# Canonical copy from SprintML/watermark_localization (HF dataset root).
+# Re-sync: bash scripts/task1/sync_watermark_repos.sh
+schema_version: 1
+task: llm_watermark_localization
+
+tokenizer:
+  name: Qwen/Qwen2.5-7B-Instruct
+  revision: a09a35458c702b33eeacc393d103063234e8bc28
+  authoritative_sequence: token_ids
+
+watermark_families:
+  - textseal
+  - gumbelmax
+  - kgw
+  - unigram
+
+repositories:
+  textseal:
+    url: https://github.com/facebookresearch/textseal
+    commit: 788fe8bff5cf086f0881928ce9a81aa08c21dff1
+    provides:
+      - TextSeal
+      - Gumbel-Max
+    detector_entry_points:
+      - textseal.watermarking.config.WatermarkConfig
+      - textseal.watermarking.detector.TextSealDetector
+  kgw:
+    url: https://github.com/jwkirchenbauer/lm-watermarking
+    commit: 82922516930c02f8aa322765defdb5863d07a00e
+    provides:
+      - KGW
+    detector_entry_points:
+      - extended_watermark_processor.WatermarkDetector
+  unigram:
+    repository: XuandongZhao/Unigram-Watermark
+    url: https://github.com/XuandongZhao/Unigram-Watermark
+    commit: b96cdb4d52771e3cbd543a9d9aeeaec8d0790ca2
+
+watermarks:
+  textseal:
+    key_a: 947821031
+    key_b: 1562881159
+    ngram: 3
+    mixing_alpha: 0.5
+    method: uniform
+    scoring_method: v1
+  gumbelmax:
+    secret_key: 2004683203
+    ngram: 2
+    method: uniform
+    scoring_method: v1
+  kgw:
+    gamma: 0.25
+    delta: 1.5
+    seeding_scheme: ff-anchored_minhash_prf-4-True-1306382177
+    select_green_tokens: true
+    ignore_repeated_ngrams: true
+  unigram:
+    fraction: 0.5
+    strength: 1.0
+    watermark_key: 1873092841
+
+disclosure:
+  public:
+    - watermark family names
+    - exact detector parameters
+    - watermark keys
+    - tokenizer name and pinned revision
+    - official repositories and pinned commits
+  hidden:
+    - watermark family active at each token
+    - test labels
+    - test span boundaries
+    - private state arrays

@@ -17,9 +17,9 @@ PROGRESS_STALE_SECONDS = 120
 SACCT_HOURS = 6
 COOLDOWN_SOON_SECONDS = 60
 
-# Leaderboard: set URL when subject is released (empty = disabled in live)
-LEADERBOARD_URL = ""
-LEADERBOARD_TASK_IDS: list[str] = []  # e.g. ["task_1", "task_2", "task_3"]
+# Leaderboard UI (external page); rows still come from team_state / mock fixtures
+LEADERBOARD_URL = "http://35.192.205.84/leaderboard_page"
+LEADERBOARD_TASK_IDS: list[str] = ["task_1", "task_2", "task_3"]
 
 
 @dataclass(frozen=True)

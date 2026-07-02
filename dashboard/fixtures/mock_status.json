@@ -2,7 +2,7 @@
   "mode": "mock",
   "timestamp": "2026-06-29T20:30:00",
   "refresh_seconds": 5,
-  "account": "training2557",
+  "account": "training2625",
   "gpu_summary": { "used": 6, "team_jobs": 4 },
   "jobs_state": {
     "123456": {
