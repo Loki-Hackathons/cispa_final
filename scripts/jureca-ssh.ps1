@@ -1,4 +1,4 @@
-# SSH to JURECA via Git Bash (ControlMaster works; Windows OpenSSH does not).
+# SSH to JURECA via WSL Ubuntu (ControlMaster works on Linux).
 # Usage:
 #   .\scripts\jureca-ssh.ps1 hostname
 #   .\scripts\jureca-ssh.ps1 "squeue -u ansart1"
@@ -11,42 +11,47 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$WslDistro = "Ubuntu-26.04"
+$script:WslExitCode = 0
 
-$GitBash = "C:\Program Files\Git\bin\bash.exe"
-if (-not (Test-Path $GitBash)) {
-    throw "Git Bash not found at $GitBash. Install Git for Windows."
+function Invoke-Wsl {
+    param([string]$Script)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $out = wsl -d $WslDistro -- bash -lc $Script 2>&1
+        $script:WslExitCode = $LASTEXITCODE
+        return ($out | Out-String).Trim()
+    } finally {
+        $ErrorActionPreference = $prev
+    }
 }
 
-$SshConfig = "/c/Users/super/.ssh/config"
-$ControlPath = "/c/Users/super/.ssh/sockets/ctl-%r@%h-%p"
-$AskPass = "/c/Users/super/.ssh/askpass_totp_once.sh"
-$TotpFile = "/c/Users/super/.ssh/totp_once.txt"
-$TotpLock = "/c/Users/super/.ssh/totp_once.lock"
-$SocketsDir = "$env:USERPROFILE\.ssh\sockets"
-
-New-Item -ItemType Directory -Force -Path $SocketsDir | Out-Null
-
-function Invoke-JurecaBash {
-    param([string]$BashCommand)
-    $out = & $GitBash -lc $BashCommand 2>&1
-    $text = ($out | Out-String).Trim()
-    if ($text) { Write-Output $text }
-    return $LASTEXITCODE
+function Write-WslOutput {
+    param([string]$Text)
+    if ($Text) { Write-Output $Text }
 }
 
-function Clear-TotpOnce {
-    $null = Invoke-JurecaBash "rm -f '$TotpFile' '$TotpLock' 2>/dev/null || true"
-}
-
-function Test-JurecaMaster {
-    $cmd = "/usr/bin/ssh -F '$SshConfig' -o ControlPath='$ControlPath' -O check jureca 2>&1"
-    $out = (& $GitBash -lc $cmd 2>&1 | Out-String)
-    return ($out -match "Master running")
+function Get-JurecaMasterPid {
+    $out = wsl -d $WslDistro -- bash -lc 'ssh -o ControlPath=~/.ssh/sockets/ctl-%r@%h-%p -O check jureca 2>&1' 2>&1 | Out-String
+    if ($out -match 'Master running \(pid=(\d+)\)') { return $Matches[1] }
+    return $null
 }
 
 function Stop-JurecaMaster {
-    $null = Invoke-JurecaBash "/usr/bin/ssh -F '$SshConfig' -o ControlPath='$ControlPath' -O exit jureca 2>/dev/null || true"
-    $null = Invoke-JurecaBash "rm -f /c/Users/super/.ssh/sockets/* 2>/dev/null || true"
+    $masterPid = Get-JurecaMasterPid
+    if ($masterPid) {
+        $null = Invoke-Wsl "kill -9 $masterPid 2>/dev/null || true"
+    }
+    $null = Invoke-Wsl 'pkill -f "ssh.*ControlMaster.*jureca" 2>/dev/null || true'
+    $null = Invoke-Wsl 'rm -f ~/.ssh/sockets/* ~/.ssh/totp_once.txt 2>/dev/null || true'
+}
+
+function Test-JurecaMasterAlive {
+    $out = wsl -d $WslDistro -- bash -lc 'ssh -o ControlPath=~/.ssh/sockets/ctl-%r@%h-%p -O check jureca 2>&1' 2>&1 | Out-String
+    if ($out -notmatch 'Master running') { return $false }
+    $null = Invoke-Wsl "timeout 15 ssh -o ControlMaster=no jureca true"
+    return ($script:WslExitCode -eq 0)
 }
 
 function Start-JurecaMaster {
@@ -56,36 +61,41 @@ function Start-JurecaMaster {
     }
 
     Stop-JurecaMaster
-    Clear-TotpOnce
 
-    $masterCmd = @"
-printf '%s' '$($env:TOTP_CODE)' > '$TotpFile'
-chmod +x '$AskPass'
-export SSH_ASKPASS='$AskPass' SSH_ASKPASS_REQUIRE=force DISPLAY=:0
-/usr/bin/ssh -F '$SshConfig' -o NumberOfPasswordPrompts=1 -o ControlMaster=yes -o ControlPath='$ControlPath' -o ControlPersist=24h -MNf jureca
-rc=`$?
-rm -f '$TotpFile' '$TotpLock' 2>/dev/null || true
-exit `$rc
-"@
-
-    $rc = Invoke-JurecaBash $masterCmd
-    if ($rc -ne 0) {
-        Write-Error "Failed to establish SSH control master (exit $rc). TOTP may be invalid or expired."
-        exit $rc
+    $totp = $env:TOTP_CODE -replace "'", "'\\''"
+    $null = Invoke-Wsl "printf '%s' '$totp' > ~/.ssh/totp_once.txt && ~/.local/bin/jureca-master.sh"
+    if ($script:WslExitCode -ne 0) {
+        Write-Error "Failed to establish SSH control master (exit $($script:WslExitCode)). TOTP may be invalid or expired."
+        exit $script:WslExitCode
     }
 
     Start-Sleep -Seconds 1
-    if (-not (Test-JurecaMaster)) {
-        Write-Error "SSH master did not start. TOTP may be invalid or expired."
+    if (-not (Test-JurecaMasterAlive)) {
+        Stop-JurecaMaster
+        Write-Error "Failed to establish SSH control master. TOTP may be invalid or expired."
         exit 1
     }
+
+    Remove-Item Env:TOTP_CODE -ErrorAction SilentlyContinue
 }
 
-if (-not (Test-JurecaMaster)) {
+function Invoke-JurecaRemote {
+    param([string]$Command)
+    $escaped = $Command -replace "'", "'\\''"
+    $text = Invoke-Wsl "bash ~/.local/bin/jureca-run.sh '$escaped'"
+    Write-WslOutput $text
+}
+
+if (-not (Test-JurecaMasterAlive)) {
+    if (Get-JurecaMasterPid) { Stop-JurecaMaster }
     Start-JurecaMaster
 }
 
-$escaped = $RemoteCommand -replace "'", "'\\''"
-$slaveCmd = "/usr/bin/ssh -F '$SshConfig' -o ControlMaster=no -o ControlPath='$ControlPath' jureca '$escaped'"
-$rc = Invoke-JurecaBash $slaveCmd
-exit $rc
+Invoke-JurecaRemote $RemoteCommand
+$rc = $script:WslExitCode
+if ($rc -ne 0) {
+    Stop-JurecaMaster
+    Write-Error "SSH command failed (exit $rc). If master was lost, provide a fresh TOTP and retry."
+    exit $rc
+}
+exit 0
