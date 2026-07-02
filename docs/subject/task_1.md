@@ -67,6 +67,20 @@ Rules: exactly `document_id` + `scores`; every test document exactly once; `scor
 
 Leaderboard split: 30% public / 70% private, assigned deterministically per `document_id` (all tokens of a document stay together).
 
+Ground truth is binary (0/1), but scoring is a **ranking metric** — optimize TPR at a fixed FPR, not MSE on labels.
+
+## Proposed strategy (Team Loki)
+
+1. **Baseline (H0–H3):** Load YAML keys + official detector repos. Run all four detectors (TextSeal, Gumbel-Max, Unigram, KGW) per token. KGW **must** use CUDA (`torch.randperm` on GPU). Submit one valid `.jsonl` early to test the pipeline and API cooldowns.
+
+2. **Feature fusion (H3–H8):** Raw detector scores are noisy — do not use them directly. Stack per-token features (4 detector signals + optional local context) and train a lightweight calibrator (logistic regression / small MLP) on **train**, tune on **val**. Optimize for **TPR @ 0.1% FPR** (pool all val tokens, simulate the exact metric locally).
+
+3. **Span post-processing:** Watermarked regions are contiguous. Apply temporal smoothing (moving average over neighboring tokens) and penalize isolated high-score tokens surrounded by clean tokens.
+
+4. **Inference & submits:** Run on 1 GPU A100 on JURECA. Iterate on val first; submit to leaderboard only when val score improves (~5 min cooldown). Calibrate thresholds on **val**, not train (only 90 docs — overfit risk).
+
+**Compute:** JURECA is required for production (KGW + shared data/API). Colab is optional for prototyping while JURECA access is pending — not a substitute once cluster is available. 1 GPU is enough for this task.
+
 ## References
 
 1. Kirchenbauer et al., "A Watermark for Large Language Models" (KGW), ICML 2023.
