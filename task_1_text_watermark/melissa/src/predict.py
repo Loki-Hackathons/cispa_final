@@ -1,8 +1,9 @@
-"""Phase 6 — produce the test submission from a trained calibrator.
+"""Phase 6 — produce the test submission from the selected scorer.
 
-Loads a calibrator saved by ``train_calibrator.py``, scores every test token with the
-**correct, vendor-based** watermark features (TextSeal / Gumbel-Max / Unigram + KGW),
-applies the selected span smoothing, and writes ``outputs/submission.jsonl``.
+Loads the scorer chosen by ``train_calibrator.py`` (``outputs/scorer.pkl``) — either a
+calibrator head (logreg / gboost on the vendor windowed-z features) or the span-aware HMM
+— scores every test token, applies the selected moving-average smoothing, and writes
+``outputs/submission.jsonl``.
 
 Runs single-process on purpose: the KGW greenlists are built on the GPU and a single
 ``KgwMaskScorer`` keeps one greenlist cache shared across all documents (contexts recur),
@@ -11,7 +12,7 @@ which is both correct and fast. Scores are saved progressively to
 already present in the partial file.
 
 Usage:
-    python -m src.predict --model outputs/calibrator_gboost.pkl
+    python -m src.predict --model outputs/scorer.pkl
     # then submit:
     #   python ../../shared/submit.py \
     #       task_1_text_watermark/melissa/outputs/submission.jsonl \
@@ -26,10 +27,10 @@ import os
 import pickle
 
 from . import config
-from .correct_features import doc_feature_matrix
+from .correct_features import doc_feature_matrix, kgw_signal
 from .load_data import load_split
 from .pipeline import validate_submission, write_submission
-from .postprocess import postprocess
+from .postprocess import apply_smoothing
 
 
 def _load_partial(partial_path: str, expected: dict[str, int]) -> dict[str, list]:
@@ -57,10 +58,28 @@ def run(model_path: str, out_path: str | None = None) -> str:
     config.ensure_dirs()
     with open(model_path, "rb") as fh:
         art = pickle.load(fh)
-    model, scaler = art["model"], art["scaler"]
-    smooth_radius = art.get("smooth_radius", 0)
-    smooth_sigma = art.get("smooth_sigma", 0.0)
+    scorer = art.get("scorer", "calibrator")
+    window = art.get("smooth_window", 1)
     use_kgw = art.get("use_kgw", True)
+
+    if scorer == "calibrator":
+        model, scaler = art["model"], art["scaler"]
+
+        def _raw(token_ids):
+            feat = doc_feature_matrix(token_ids, use_kgw=use_kgw)
+            return model.predict_proba(scaler.transform(feat))[:, 1]
+    elif scorer == "hmm":
+        from hmm_scorer import posterior_scores
+        hmm = art["hmm"]
+
+        def _raw(token_ids):
+            ex = {"kgw": kgw_signal(token_ids)} if use_kgw else None
+            return posterior_scores(hmm, list(token_ids), ex)
+    else:
+        raise ValueError(f"unknown scorer type in artifact: {scorer!r}")
+
+    print(f"[predict] scorer={art.get('model_kind', scorer)} window={window} "
+          f"use_kgw={use_kgw}")
 
     test = load_split("test")
     expected = {d.document_id: d.n_tokens for d in test}
@@ -74,18 +93,13 @@ def run(model_path: str, out_path: str | None = None) -> str:
     if smoothed:
         print(f"[predict] resuming: {len(smoothed)}/{total} docs already in {partial_path}")
     todo = [d for d in test if d.document_id not in smoothed]
-    print(f"[predict] {len(todo)} docs to score (use_kgw={use_kgw}, {len(smoothed)} cached)")
+    print(f"[predict] {len(todo)} docs to score ({len(smoothed)} cached)")
 
     n_done = len(smoothed)
     with open(partial_path, "a", encoding="utf-8") as pf:
         for d in todo:
-            feat = doc_feature_matrix(d.token_ids, use_kgw=use_kgw)
-            raw = model.predict_proba(scaler.transform(feat))[:, 1]
-            if smooth_radius and smooth_radius > 0:
-                sc = postprocess([float(x) for x in raw],
-                                 smooth_radius=smooth_radius, smooth_sigma=smooth_sigma)
-            else:
-                sc = [min(1.0, max(0.0, float(x))) for x in raw]
+            raw = _raw(d.token_ids)
+            sc = apply_smoothing([float(x) for x in raw], window)
             smoothed[d.document_id] = sc
             pf.write(json.dumps({"document_id": d.document_id, "scores": sc}) + "\n")
             pf.flush()
@@ -102,7 +116,7 @@ def run(model_path: str, out_path: str | None = None) -> str:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate + validate test submission.")
-    parser.add_argument("--model", required=True, help="Path to calibrator .pkl")
+    parser.add_argument("--model", required=True, help="Path to scorer .pkl")
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
     run(args.model, args.out)

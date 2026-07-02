@@ -22,7 +22,6 @@ set -euo pipefail
 DATA="${DATA_DIR:-/p/scratch/training2625/dougnon1/Loki/watermark_localization}"
 REPO="${REPO_ROOT:-/p/scratch/training2625/dougnon1/Loki/cispa_final}"
 SCRATCH_VENV="$DATA/.venv"
-MODEL="gboost"
 
 echo "Job ${SLURM_JOB_ID:-local} | $(date)"
 
@@ -59,34 +58,34 @@ fi
 cd "$REPO/task_1_text_watermark/melissa"
 mkdir -p logs outputs
 
-# One-time cleanup when the feature pipeline changes: a stale calibrator trained on the
-# old feature layout would crash predict, and stale partial scores would be reused by the
+# One-time cleanup when the feature pipeline changes: a stale scorer trained on the old
+# feature layout would crash predict, and stale partial scores would be reused by the
 # resume logic. The sentinel makes this happen exactly once after an upgrade.
-SENTINEL="outputs/.pipeline_vendor_v1"
+SENTINEL="outputs/.pipeline_multihead_v1"
 if [ ! -f "$SENTINEL" ]; then
-  echo "Pipeline upgraded (vendor signals) — clearing stale calibrator + partial scores."
-  rm -f outputs/calibrator_*.pkl outputs/submission.partial.jsonl
+  echo "Pipeline upgraded (multi-head selection) — clearing stale scorer + partial scores."
+  rm -f outputs/scorer.pkl outputs/calibrator_*.pkl outputs/submission.partial.jsonl
   touch "$SENTINEL"
 fi
 
 echo "GPU: $(python -c 'import torch; print(torch.cuda.get_device_name(0))' 2>/dev/null || echo 'CPU')"
 
-CALIB="outputs/calibrator_${MODEL}.pkl"
-if [ -f "$CALIB" ]; then
-  echo "[1/3] Calibrator already exists ($CALIB) — skipping training."
-  echo "[2/3] Skipping validation eval (calibrator unchanged)."
+SCORER="outputs/scorer.pkl"
+if [ -f "$SCORER" ]; then
+  echo "[1/3] Scorer already exists ($SCORER) — skipping training."
+  echo "[2/3] Skipping validation eval (scorer unchanged)."
 else
-  # Fresh model → drop any partial predictions from a previous model.
+  # Fresh scorer → drop any partial predictions from a previous scorer.
   rm -f outputs/submission.partial.jsonl
-  echo "[1/3] Train calibrator ($MODEL) ..."
-  python -u -m src.train_calibrator --model "$MODEL"
+  echo "[1/3] Train + select best head (logreg / gboost / hmm) ..."
+  python -u -m src.train_calibrator
 
-  echo "[2/3] Evaluate on validation ..."
+  echo "[2/3] Evaluate selected scorer on validation ..."
   python -u -m src.evaluate --pred outputs/val_pred.jsonl --split validation
 fi
 
 echo "[3/3] Generate test submission file ..."
-python -u -m src.predict --model "$CALIB"
+python -u -m src.predict --model "$SCORER"
 
 echo ""
 echo "=== Done — outputs/submission.jsonl ready for submission ==="

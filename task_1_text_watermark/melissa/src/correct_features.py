@@ -1,4 +1,4 @@
-"""Correct, vendor-based per-token features for Task 1.
+﻿"""Correct, vendor-based per-token features for Task 1.
 
 Melissa's original detectors used a home-grown PRF that does **not** reproduce the
 dataset's watermark signals, so the calibrator was learning from noise. This module
@@ -6,10 +6,10 @@ instead reuses Alexandre's already-tested implementation, which loads the pinned
 repositories (``textseal``, ``lm-watermarking``, ``unigram-watermark``) to reproduce the
 exact PRF / greenlist math used to generate the dataset:
 
-  * ``detectors.compute_signals`` — TextSeal (dual-key Gumbel), Gumbel-Max, Unigram.
-  * ``features.doc_features``     — multi-scale windowed z-scores (centered + left +
+  * ``detectors.compute_signals`` â€” TextSeal (dual-key Gumbel), Gumbel-Max, Unigram.
+  * ``features.doc_features``     â€” multi-scale windowed z-scores (centered + left +
     right) per scheme; these are the features that separate spans at 0.1 % FPR.
-  * ``kgw_scores.KgwMaskScorer``  — correct KGW greenlists via CUDA Philox
+  * ``kgw_scores.KgwMaskScorer``  â€” correct KGW greenlists via CUDA Philox
     (``torch.randperm`` on a CUDA generator). A single scorer instance is reused so its
     greenlist cache is shared **across documents** (contexts repeat), which is both
     faster and exactly what the organizers used.
@@ -20,6 +20,7 @@ The vendor code lives in ``task_1_text_watermark/vendor/`` and is only present a
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -58,9 +59,10 @@ _KGW_STATE: dict = {}
 def _kgw_scorer() -> "KgwMaskScorer | None":
     """Singleton KGW scorer (shared greenlist cache across documents).
 
-    Uses CUDA if available (required to match the dataset's Philox greenlists); on a
-    CPU-only node it still returns a scorer so the feature matrix keeps the same width,
-    but the KGW signal will be uninformative (see the task spec's KGW note).
+    Uses CUDA if available (required to match the dataset's Philox greenlists). By
+    default, CPU KGW is disabled because it is not just slower: it produces different
+    greenlists and can poison the high-score tail at 0.1% FPR. Set
+    `WML_ALLOW_CPU_KGW=1` only for a local smoke test.
     """
     if "scorer" in _KGW_STATE:
         return _KGW_STATE["scorer"]
@@ -69,9 +71,16 @@ def _kgw_scorer() -> "KgwMaskScorer | None":
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if device == "cpu":
-            print("[kgw] WARNING: CUDA unavailable — KGW greenlists will NOT match the "
-                  "dataset (Philox). Run on a GPU node for correct KGW features.")
-        scorer = KgwMaskScorer(vocab_size=VOCAB_SIZE, device=device)
+            if os.environ.get("WML_ALLOW_CPU_KGW", "0") != "1":
+                print("[kgw] CUDA unavailable; KGW disabled to avoid non-Philox false "
+                      "signals. Run on a GPU node for correct KGW features.")
+                scorer = None
+            else:
+                print("[kgw] WARNING: CPU KGW enabled for smoke test only; greenlists "
+                      "will NOT match the dataset.")
+                scorer = KgwMaskScorer(vocab_size=VOCAB_SIZE, device=device)
+        else:
+            scorer = KgwMaskScorer(vocab_size=VOCAB_SIZE, device=device)
     except Exception as exc:  # noqa: BLE001
         print(f"[kgw] disabled ({exc}); features will omit KGW.")
         scorer = None
@@ -97,3 +106,17 @@ def doc_feature_matrix(token_ids: Sequence[int], use_kgw: bool = True) -> np.nda
 
 def kgw_available() -> bool:
     return _kgw_scorer() is not None
+
+
+def kgw_signal(token_ids: Sequence[int]) -> "np.ndarray | None":
+    """Correct per-token KGW green signal (Philox), or None if KGW is unavailable.
+
+    Reuses the shared scorer so its greenlist cache is warmed across documents. Used by
+    the HMM head, which consumes the raw signal (the calibrator head gets it through the
+    windowed-z feature matrix instead).
+    """
+    scorer = _kgw_scorer()
+    if scorer is None:
+        return None
+    return np.asarray(scorer.score_document([int(t) for t in token_ids]), dtype=np.float64)
+
