@@ -63,7 +63,7 @@ Rules: exactly `document_id` + `scores`; every test document exactly once; `scor
 
 ## Metric
 
-**TPR @ 0.1% FPR**, computed by pooling all tokens across all documents in a leaderboard subset (not averaged per-document). Score ≥ 0.5 conceptually means "watermarked" but the metric itself only cares about ranking — see Q&A below.
+**TPR @ 0.1% FPR**, computed by pooling all tokens across all documents in a leaderboard subset (not averaged per-document). Score ≥ 0.5 conceptually means "watermarked" but the metric itself only cares about ranking. Full explanation: [`docs/task1/scoring.md`](../task1/scoring.md).
 
 Leaderboard split: 30% public / 70% private, assigned deterministically per `document_id` (all tokens of a document stay together).
 

@@ -148,8 +148,31 @@ export interface HistoryEvent {
   kind: string;
   task_id: string | null;
   owner: string | null;
+  status?: string;
   score?: number;
   file?: string;
   note?: string;
+  method?: string;
   extra?: Record<string, unknown>;
+}
+
+export interface Task1AttemptSummary {
+  id: string;
+  created_at: string | null;
+  method: string | null;
+  note: string | null;
+  "tpr_at_0.1pct_fpr": number | null;
+  n_documents: number | null;
+  n_tokens: number | null;
+}
+
+export interface Task1Document {
+  document_id: string;
+  token_pieces: string[];
+  labels: number[];
+  scores: number[];
+}
+
+export interface Task1Bundle extends Task1AttemptSummary {
+  documents: Task1Document[];
 }

@@ -5,6 +5,7 @@ import { CooldownPanel } from "./components/CooldownPanel";
 import { FailedJobsPanel } from "./components/FailedJobsPanel";
 import { Header } from "./components/Header";
 import { HistoryPanel } from "./components/HistoryPanel";
+import { Task1Viewer } from "./components/Task1Viewer";
 import { LeaderboardPanel } from "./components/LeaderboardPanel";
 import { NextActionsPanel } from "./components/NextActionsPanel";
 import { NodePacksPanel } from "./components/NodePacksPanel";
@@ -102,6 +103,7 @@ export default function App() {
           </div>
 
           <HistoryPanel />
+          <Task1Viewer />
 
           <div className="grid gap-6 md:grid-cols-2">
             <OwnersPanel owners={data?.owners ?? []} />

@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from history import log_event
+from history import log_event, log_failure
 from team_state import append_score, update_task
 
 SUBMIT_COOLDOWN = int(os.environ.get("CISPA_SUBMIT_COOLDOWN", "300"))   # 5 min
@@ -43,6 +43,7 @@ def get_logits(
     task_id: str,
     log_path: str | None = None,
     owner: str | None = None,
+    method: str | None = None,
 ) -> dict:
     base_url, api_key, task_id = api_config(task_id)
     if not os.path.isfile(query_path):
@@ -71,7 +72,7 @@ def get_logits(
         owner=owner or os.environ.get("USER"),
         last_query_ts=datetime.now().isoformat(),
     )
-    log_event("logits", task_id, file=query_path, owner=owner,
+    log_event("logits", task_id, file=query_path, owner=owner, method=method,
               extra={"n_results": len(data.get("results", []))})
     return data
 
@@ -82,6 +83,8 @@ def submit_file(
     log_path: str | None = None,
     owner: str | None = None,
     content_type: str = "application/octet-stream",
+    method: str | None = None,
+    note: str | None = None,
 ) -> dict:
     base_url, api_key, task_id = api_config(task_id)
     if not os.path.isfile(file_path):
@@ -137,6 +140,7 @@ def submit_file(
         score_history=history,
     )
     log_event("submit", task_id, score=score, file=file_path, owner=owner,
+              method=method, note=note,
               extra={"attempt": attempt, "response": {k: v for k, v in body.items()
                                                       if k in ("score", "attempt", "message", "status")}})
     return body
@@ -153,6 +157,9 @@ def main() -> None:
     )
     parser.add_argument("--log-dir", default="./logs/api")
     parser.add_argument("--owner", default=None, help="judoor username for team_state")
+    parser.add_argument("--method", default=None,
+                         help="Short description of the approach used, e.g. 'entropy-weighted KGW+TextSeal ensemble'")
+    parser.add_argument("--note", default=None, help="Free-form note about this attempt")
     parser.add_argument("--no-save-logs", action="store_true")
     args = parser.parse_args()
 
@@ -161,14 +168,20 @@ def main() -> None:
     logits_log = None if args.no_save_logs else f"{args.log_dir}/logits_{stem}_{ts}.json"
     submit_log = None if args.no_save_logs else f"{args.log_dir}/submit_{stem}_{ts}.json"
 
-    if args.action in ("logits", "both"):
-        get_logits(args.file, args.task_id, logits_log, owner=args.owner)
-        if args.action == "both":
-            print("Waiting 5s before submit...")
-            time.sleep(5)
+    try:
+        if args.action in ("logits", "both"):
+            get_logits(args.file, args.task_id, logits_log, owner=args.owner, method=args.method)
+            if args.action == "both":
+                print("Waiting 5s before submit...")
+                time.sleep(5)
 
-    if args.action in ("submit", "both"):
-        submit_file(args.file, args.task_id, submit_log, owner=args.owner)
+        if args.action in ("submit", "both"):
+            submit_file(args.file, args.task_id, submit_log, owner=args.owner,
+                       method=args.method, note=args.note)
+    except (Exception, SystemExit) as e:
+        kind = "submit" if args.action != "logits" else "logits"
+        log_failure(kind, args.task_id, e, owner=args.owner, file=args.file, method=args.method)
+        raise
 
 
 if __name__ == "__main__":

@@ -181,7 +181,9 @@ ssh -L 8080:localhost:8080 <user>@jureca.fz-juelich.de
 
 **Agent SSH policy:** the agent must SSH into JURECA itself when cluster work is needed (`ssh -i ~/.ssh/id_ed25519 -o Ciphers=aes256-ctr -o MACs=hmac-sha2-256-etm@openssh.com ansart1@jureca.fz-juelich.de`). Every connection prompts a TOTP code — **ask the user for the 6-digit code in the chat (never in a console)** and inject it with the askpass helper: set `TOTP_CODE`, `SSH_ASKPASS=%USERPROFILE%\.ssh\askpass_totp.cmd`, `SSH_ASKPASS_REQUIRE=force`, `DISPLAY=:0`, then run ssh immediately (codes are single-use, ~30 s validity). Batch commands into one-shot `ssh ... '...'` calls to minimize TOTP entries. Start long work in cluster `tmux`. Full recipe in the root `AGENTS.md`.
 
-**Submission history:** all submits/analyses are logged to `history/submissions.jsonl` (`shared/history.py`). CLI: `python shared/history.py list`. Also visible in the dashboard History panel.
+**Submission history — log EVERY attempt with a method note:** `submit.py`/`analyze.py` auto-log every attempt (success or failure) to `history/submissions.jsonl`. Always pass `--method "<approach>"` (and `--note` if useful) — this is the team's record of what was tried. CLI: `python shared/history.py list` / `best`. Dashboard: **Submission history** panel (filterable by kind).
+
+**Task 1 viewer:** `python shared/task1_eval.py --dataset <val.jsonl> --predictions <scores.jsonl> --method "..."` computes TPR@0.1%FPR locally and exports a token-level bundle for the dashboard's **Task 1 — Token viewer** (ground-truth underline vs our confidence heatmap). Run this before any real API submission when ground truth is available.
 
 See [docs/cluster-guide.md](docs/cluster-guide.md) and [README.md](README.md). API URL + `--task-id`: [docs/subject/subject.md](docs/subject/subject.md#api--leaderboard).
 

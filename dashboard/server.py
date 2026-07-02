@@ -4,7 +4,7 @@ import json
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -15,7 +15,7 @@ from dashboard.providers.mock import MockProvider
 
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "shared"))
-from history import read_events  # noqa: E402
+from history import history_path, read_events  # noqa: E402
 
 config = load_config()
 provider = MockProvider(config) if config.mode == "mock" else LiveProvider(config)
@@ -24,6 +24,7 @@ app = FastAPI(title="LOKI CISPA Dashboard", version="1.0.0")
 
 _CLIENT_DIST = _ROOT / "client" / "dist"
 _MOCK_HISTORY = Path(__file__).resolve().parent / "fixtures" / "mock_history.jsonl"
+_MOCK_TASK1_VIZ = Path(__file__).resolve().parent / "fixtures" / "task1_viz"
 
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -47,6 +48,46 @@ def history(limit: int = 100, task_id: str | None = None, kind: str | None = Non
             events = [e for e in events if e.get("kind") == kind]
         return events[:limit]
     return read_events(limit=limit, task_id=task_id, kind=kind)
+
+
+def _task1_viz_dir() -> Path:
+    return history_path().parent / "task1_viz"
+
+
+def _task1_bundle_paths() -> list[Path]:
+    d = _MOCK_TASK1_VIZ if config.mode == "mock" else _task1_viz_dir()
+    if not d.is_dir():
+        return []
+    return sorted(d.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+@app.get("/api/task1/attempts")
+def task1_attempts() -> list[dict]:
+    """Summaries only (no token arrays) — for the attempt picker."""
+    summaries = []
+    for path in _task1_bundle_paths():
+        try:
+            bundle = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        summaries.append({
+            "id": path.stem,
+            "created_at": bundle.get("created_at"),
+            "method": bundle.get("method"),
+            "note": bundle.get("note"),
+            "tpr_at_0.1pct_fpr": bundle.get("tpr_at_0.1pct_fpr"),
+            "n_documents": bundle.get("n_documents"),
+            "n_tokens": bundle.get("n_tokens"),
+        })
+    return summaries
+
+
+@app.get("/api/task1/attempts/{attempt_id}")
+def task1_attempt(attempt_id: str) -> dict:
+    for path in _task1_bundle_paths():
+        if path.stem == attempt_id:
+            return json.loads(path.read_text(encoding="utf-8"))
+    raise HTTPException(status_code=404, detail="Attempt not found")
 
 
 def _mount_static() -> None:

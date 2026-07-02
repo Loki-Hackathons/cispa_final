@@ -1,0 +1,9 @@
+[submodule "task_1_text_watermark/vendor/textseal"]
+	path = task_1_text_watermark/vendor/textseal
+	url = https://github.com/facebookresearch/textseal
+[submodule "task_1_text_watermark/vendor/unigram-watermark"]
+	path = task_1_text_watermark/vendor/unigram-watermark
+	url = https://github.com/XuandongZhao/Unigram-Watermark
+[submodule "task_1_text_watermark/vendor/lm-watermarking"]
+	path = task_1_text_watermark/vendor/lm-watermarking
+	url = https://github.com/jwkirchenbauer/lm-watermarking

@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from history import log_event
+from history import log_event, log_failure
 from submit import get_logits
 from team_state import update_task
 
@@ -35,7 +35,8 @@ def load_dataset(path: str) -> dict:
     return torch.load(path, weights_only=False)
 
 
-def analyze_local_npz(submission_path: str, dataset: dict) -> dict:
+def analyze_local_npz(submission_path: str, dataset: dict, task_id: str,
+                       owner: str | None = None, method: str | None = None, note: str | None = None) -> dict:
     """L2 analysis for adversarial .npz submissions (regional Task 1 format)."""
     sub = np.load(submission_path)
     adv_images = sub["images"]
@@ -50,6 +51,9 @@ def analyze_local_npz(submission_path: str, dataset: dict) -> dict:
     avg_norm = float(np.mean(l2_norm))
     print(f"Local L2 (normalized avg): {avg_norm:.6f} — lower bound only")
     print("Use --mode api for true leaderboard score.")
+
+    log_event("analysis", task_id, score=avg_norm, file=submission_path, owner=owner,
+              method=method, note=note, status="local", extra={"mode": "local"})
 
     return {
         "mode": "local",
@@ -69,9 +73,11 @@ def analyze_api_npz(
     dataset: dict,
     task_id: str,
     owner: str | None = None,
+    method: str | None = None,
+    note: str | None = None,
 ) -> dict:
     """Query API logits and compute adversarial L2 score (regional Task 1 metric)."""
-    logits_data = get_logits(submission_path, task_id, owner=owner)
+    logits_data = get_logits(submission_path, task_id, owner=owner, method=method)
     sub = np.load(submission_path)
     adv_images = sub["images"]
     original_images = dataset["images"].numpy()
@@ -126,7 +132,7 @@ def analyze_api_npz(
         last_query_ts=datetime.now().isoformat(),
     )
     log_event("analysis", task_id, score=leaderboard_score, file=submission_path,
-              owner=owner, extra={"success_rate": success_rate})
+              owner=owner, method=method, note=note, extra={"success_rate": success_rate})
 
     return {
         "mode": "api",
@@ -147,6 +153,9 @@ def main() -> None:
     parser.add_argument("--dataset", default=None, help="natural_images.pt for local/api npz")
     parser.add_argument("--output", default=None, help="Save analysis JSON here")
     parser.add_argument("--owner", default=None)
+    parser.add_argument("--method", default=None,
+                         help="Short description of the approach used")
+    parser.add_argument("--note", default=None, help="Free-form note about this attempt")
     args = parser.parse_args()
 
     if not args.dataset:
@@ -154,10 +163,16 @@ def main() -> None:
 
     dataset = load_dataset(args.dataset)
 
-    if args.mode == "local":
-        analysis = analyze_local_npz(args.file, dataset)
-    else:
-        analysis = analyze_api_npz(args.file, dataset, args.task_id, owner=args.owner)
+    try:
+        if args.mode == "local":
+            analysis = analyze_local_npz(args.file, dataset, args.task_id, owner=args.owner,
+                                          method=args.method, note=args.note)
+        else:
+            analysis = analyze_api_npz(args.file, dataset, args.task_id, owner=args.owner,
+                                        method=args.method, note=args.note)
+    except (Exception, SystemExit) as e:
+        log_failure("analysis", args.task_id, e, owner=args.owner, file=args.file, method=args.method)
+        raise
 
     out = args.output or f"logs/analysis_{args.mode}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     Path(out).parent.mkdir(parents=True, exist_ok=True)

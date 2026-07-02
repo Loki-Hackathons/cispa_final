@@ -33,14 +33,22 @@ def log_event(
     file: str | None = None,
     owner: str | None = None,
     note: str | None = None,
+    method: str | None = None,
+    status: str = "success",
     extra: dict | None = None,
 ) -> dict:
-    """Append one event. kind: submit | logits | analysis | experiment | ..."""
+    """Append one event — EVERY attempt is logged, including failures.
+
+    kind: submit | logits | analysis | local_eval | experiment | ...
+    method: short description of the approach used (e.g. "KGW+TextSeal ensemble, entropy weighting").
+    status: success | error | local — always set, so failed attempts are never silently dropped.
+    """
     event: dict = {
         "ts": datetime.now().isoformat(timespec="seconds"),
         "kind": kind,
         "task_id": task_id,
         "owner": owner or os.environ.get("USER") or os.environ.get("USERNAME"),
+        "status": status,
     }
     if score is not None:
         event["score"] = float(score)
@@ -48,6 +56,8 @@ def log_event(
         event["file"] = str(file)
     if note:
         event["note"] = note
+    if method:
+        event["method"] = method
     if extra:
         event["extra"] = extra
 
@@ -56,6 +66,22 @@ def log_event(
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
     return event
+
+
+def log_failure(
+    kind: str,
+    task_id: str | None,
+    error: Exception | str,
+    *,
+    owner: str | None = None,
+    file: str | None = None,
+    method: str | None = None,
+) -> dict:
+    """Log a failed attempt. Call from except blocks so failures are never lost."""
+    return log_event(
+        kind, task_id, owner=owner, file=file, method=method,
+        status="error", extra={"error": str(error)},
+    )
 
 
 def read_events(
@@ -103,15 +129,17 @@ def _print_table(events: list[dict]) -> None:
     if not events:
         print(f"No events in {history_path()}")
         return
-    print(f"{'TIME':<20} {'KIND':<10} {'TASK':<10} {'SCORE':>10}  FILE / NOTE")
-    print("-" * 90)
+    print(f"{'TIME':<20} {'KIND':<10} {'TASK':<8} {'STATUS':<8} {'SCORE':>10}  METHOD / FILE / NOTE")
+    print("-" * 110)
     for ev in events:
         score = f"{ev['score']:.6f}" if ev.get("score") is not None else "—"
-        detail = ev.get("file") or ""
-        if ev.get("note"):
-            detail = f"{detail}  [{ev['note']}]" if detail else ev["note"]
+        parts = [p for p in (ev.get("method"), ev.get("file"), ev.get("note")) if p]
+        if ev.get("status") == "error" and ev.get("extra", {}).get("error"):
+            parts.append(f"ERROR: {ev['extra']['error']}")
+        detail = "  |  ".join(parts)
+        status = ev.get("status", "success")
         print(f"{ev.get('ts', ''):<20} {ev.get('kind', ''):<10} "
-              f"{(ev.get('task_id') or '—'):<10} {score:>10}  {detail}")
+              f"{(ev.get('task_id') or '—'):<8} {status:<8} {score:>10}  {detail}")
 
 
 def main() -> None:
@@ -129,7 +157,9 @@ def main() -> None:
     p_log.add_argument("--task", default=None)
     p_log.add_argument("--score", type=float, default=None)
     p_log.add_argument("--file", default=None)
+    p_log.add_argument("--method", default=None, help="Approach used, e.g. 'entropy-weighted ensemble'")
     p_log.add_argument("--note", default=None)
+    p_log.add_argument("--status", default="success", choices=["success", "error", "local"])
 
     sub.add_parser("best", help="Best score per task")
 
@@ -142,8 +172,8 @@ def main() -> None:
         else:
             _print_table(events)
     elif args.cmd == "log":
-        ev = log_event(args.kind, args.task, score=args.score,
-                       file=args.file, note=args.note)
+        ev = log_event(args.kind, args.task, score=args.score, file=args.file,
+                       method=args.method, note=args.note, status=args.status)
         print(f"Logged: {json.dumps(ev, ensure_ascii=False)}")
     elif args.cmd == "best":
         for task, ev in sorted(best_scores().items()):
