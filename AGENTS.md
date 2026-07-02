@@ -179,7 +179,7 @@ ssh -L 8080:localhost:8080 <user>@jureca.fz-juelich.de
 
 **Finals project: `training2625`** — SLURM account `training2625`, reservation `cispahack`. Team scratch: `/p/scratch/training2625/ansart1/loki/`.
 
-**Agent SSH policy:** use WSL + [`scripts/jureca-ssh.ps1`](scripts/jureca-ssh.ps1) for all cluster SSH (ControlMaster multiplexing — one TOTP per session, not per command). **Before asking for TOTP:** `wsl -d Ubuntu-26.04 -- bash -lc "ssh -O check jureca"` — if `Master running`, call the wrapper without TOTP. Otherwise ask the user for a 6-digit code **in the chat**, set `$env:TOTP_CODE`, run once, then all further wrapper calls skip TOTP (~24 h). Native Windows `ssh jureca` remains a fallback (one TOTP per call). Long jobs in cluster `tmux`. Full workflow, test evidence, and gotchas: root [`../AGENTS.md`](../AGENTS.md#agent-ssh-policy-important).
+**Agent SSH policy:** WSL ControlMaster — **Phase 1:** [`scripts/jureca-connect.ps1`](scripts/jureca-connect.ps1) (TOTP once). **Phase 2:** WSL `ssh -o ControlMaster=no jureca '…'` or `jureca-run.sh` (no TOTP; failed commands do not kill the master). Check first: `wsl -d Ubuntu-26.04 -- bash -lc "ssh -O check jureca"`. Native Windows `ssh jureca` is fallback only (one TOTP per call). Long jobs in cluster `tmux`. Full workflow: root [`../AGENTS.md`](../AGENTS.md#agent-ssh-policy-important).
 
 **Submission history — log EVERY attempt with a method note:** `submit.py`/`analyze.py` auto-log every attempt (success or failure) to `history/submissions.jsonl`. Always pass `--method "<approach>"` (and `--note` if useful) — this is the team's record of what was tried. CLI: `python shared/history.py list` / `best`. Dashboard: **Submission history** panel (filterable by kind).
 

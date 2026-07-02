@@ -35,6 +35,28 @@ Replace `ansart1` with your judoor username. MFA (TOTP) is required on both.
 
 **Windows (PowerShell):** use `$env:USERPROFILE\.ssh\id_ed25519` instead of `~/.ssh/id_ed25519`.
 
+### Agent SSH on Windows (ControlMaster via WSL)
+
+Native Windows OpenSSH prompts TOTP on every connection. Cursor agents use **WSL Ubuntu 26.04** + SSH multiplexing instead.
+
+**Phase 1 — connect (TOTP once):**
+
+```powershell
+wsl -d Ubuntu-26.04 -- bash -lc "ssh -O check jureca"
+cd cispa_final
+$env:TOTP_CODE="<6-digit code>"; .\scripts\jureca-connect.ps1
+```
+
+**Phase 2 — run commands (no TOTP, master stays alive on failure):**
+
+```powershell
+wsl -d Ubuntu-26.04 -- bash -lc "ssh -o ControlMaster=no jureca 'squeue -u ansart1'"
+wsl -d Ubuntu-26.04 -- bash -lc "bash ~/.local/bin/jureca-run.sh 'hostname'"
+wsl -d Ubuntu-26.04 -- bash -lc "scp -o ControlMaster=no jureca:/remote/path ./local/"
+```
+
+Full agent rules (quoting, when to re-TOTP): root [`AGENTS.md`](../../AGENTS.md#agent-ssh-policy-important).
+
 ## Project activation
 
 ```bash
