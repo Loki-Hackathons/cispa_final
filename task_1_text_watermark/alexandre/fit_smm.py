@@ -32,8 +32,9 @@ def iter_spans(labels):
 
 def collect_pools(docs, kgw=None, signal_cache=None):
     """Return (h1 pools, h0 pools, span lengths, counters) from labeled docs."""
-    h1 = {"textseal": [], "gumbelmax": [], "kgw": []}
-    h0 = {"textseal": [], "gumbelmax": [], "kgw": []}
+    from collections import defaultdict
+    h1 = defaultdict(list)
+    h0 = defaultdict(list)
     span_lengths = []
     n_tokens = n_spans = n_edge = 0
     for rec in docs:
@@ -108,7 +109,7 @@ def fit_bernoulli_kgw(h1_vals, gamma=0.25) -> Emission:
 def fit_params(docs, kgw=None, signal_cache=None, emission_mode="binned",
                n_bins=30, clip=4.0, fit_priors=True, shifts=None,
                neutral_invalid=False, p_span_scale=1.0,
-               edge_prior=None) -> SmmParams:
+               edge_prior=None, include_unigram=False) -> SmmParams:
     h1, h0, span_lengths, stats = collect_pools(docs, kgw, signal_cache)
 
     if fit_priors:
@@ -130,9 +131,13 @@ def fit_params(docs, kgw=None, signal_cache=None, emission_mode="binned",
                                        neutral_invalid=neutral_invalid)
     elif emission_mode == "binned":
         for name in ("textseal", "gumbelmax"):
-            if len(h1[name]) >= 500:
+            if len(h1.get(name, ())) >= 500:
                 emissions[name] = fit_binned_llr(h0[name], h1[name], n_bins, clip)
-        emissions["kgw"] = fit_bernoulli_kgw(h1["kgw"])
+        emissions["kgw"] = fit_bernoulli_kgw(h1.get("kgw", np.array([])))
+        if include_unigram:
+            # too few labeled Unigram spans to fit; keep the conservative
+            # hand-set single hypothesis (see smm_scorer.DEFAULT_SHIFTS)
+            emissions["unigram"] = Emission(kind="gaussian", shifts=(0.5,))
     else:
         raise ValueError(emission_mode)
 

@@ -26,6 +26,7 @@ from scipy.special import logsumexp
 
 from detectors import (GUMBEL_NGRAM, H0_MOMENTS, TEXTSEAL_NGRAM, _dedup_mask,
                        compute_signals)
+from unigram_scan import REAL_KEY, VOCAB_SIZE, greenlist_mask, token_dedup_mask
 
 KGW_CONTEXT = 3  # ff-anchored_minhash_prf-4 self-salt: 3 context + 1 target
 
@@ -39,7 +40,28 @@ DEFAULT_SHIFTS = {
     "textseal": (0.45, 0.65, 0.9),
     "gumbelmax": (0.55, 0.8, 1.1),
     "kgw": (0.6, 0.9, 1.3),
+    # Single conservative hypothesis: signal confirmed present (unlabeled test-set
+    # scan vs 20 decoy keys, docs/task1/attempt1.md §9/§14) but extremely rare
+    # (~1 clearly-attributable document out of 1320); a wide shift grid would
+    # only add FPR risk on the ~1319 docs where it is absent.
+    "unigram": (0.5,),
 }
+
+_UNIGRAM_MASK: np.ndarray | None = None
+
+
+def _unigram_signal(token_ids) -> tuple[np.ndarray, np.ndarray]:
+    """Greenlist hit (1/0) per token; valid = first occurrence of an eligible
+    (id < BASE_VOCAB) token id, matching vendor unidetect() semantics."""
+    global _UNIGRAM_MASK
+    if _UNIGRAM_MASK is None:
+        _UNIGRAM_MASK = greenlist_mask(REAL_KEY, VOCAB_SIZE)
+    ids = np.asarray(token_ids)
+    sig = np.zeros(len(ids), dtype=np.float64)
+    in_vocab = ids < VOCAB_SIZE
+    sig[in_vocab] = _UNIGRAM_MASK[ids[in_vocab]].astype(np.float64)
+    valid = token_dedup_mask(token_ids)
+    return sig, valid
 
 
 @dataclass
@@ -99,6 +121,7 @@ def doc_signals(token_ids, extra=None) -> dict[str, tuple[np.ndarray, np.ndarray
     for name, ngram in (("textseal", TEXTSEAL_NGRAM), ("gumbelmax", GUMBEL_NGRAM)):
         valid = _dedup_mask(ids, ngram) & (pos >= ngram)
         out[name] = (sigs[name], valid)
+    out["unigram"] = _unigram_signal(ids)
     if extra and "kgw" in extra:
         sig = np.asarray(extra["kgw"], dtype=np.float64)
         valid = (_dedup_mask(ids, KGW_CONTEXT) & (pos >= KGW_CONTEXT)

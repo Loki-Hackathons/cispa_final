@@ -45,6 +45,26 @@ CONFIGS = {
                                 edge_prior=np.log(0.005)),
     "binned30_c4_edge_hi": dict(emission_mode="binned", n_bins=30, clip=4.0,
                                 edge_prior=np.log(0.08)),
+    # combination round (after first grid: binned>gauss, ps2 and edge_lo help)
+    "binned30_edge_lo_ps2": dict(emission_mode="binned", n_bins=30, clip=4.0,
+                                 p_span_scale=2.0, edge_prior=np.log(0.005)),
+    "binned40_edge_lo": dict(emission_mode="binned", n_bins=40, clip=4.0,
+                             edge_prior=np.log(0.005)),
+    "binned40_edge_lo_ps2": dict(emission_mode="binned", n_bins=40, clip=4.0,
+                                 p_span_scale=2.0, edge_prior=np.log(0.005)),
+    "binned30_edge_vlo": dict(emission_mode="binned", n_bins=30, clip=4.0,
+                              edge_prior=np.log(0.001)),
+    # final refinement around binned40_edge_lo_ps2
+    "binned40_edge_lo_ps3": dict(emission_mode="binned", n_bins=40, clip=4.0,
+                                 p_span_scale=3.0, edge_prior=np.log(0.005)),
+    "binned50_edge_lo_ps2": dict(emission_mode="binned", n_bins=50, clip=4.0,
+                                 p_span_scale=2.0, edge_prior=np.log(0.005)),
+    "binned40_edge_vlo_ps2": dict(emission_mode="binned", n_bins=40, clip=4.0,
+                                  p_span_scale=2.0, edge_prior=np.log(0.001)),
+    # winner + unigram emission re-enabled (parallel-agent integration, #408)
+    "binned50_edge_lo_ps2_uni": dict(emission_mode="binned", n_bins=50, clip=4.0,
+                                     p_span_scale=2.0, edge_prior=np.log(0.005),
+                                     include_unigram=True),
 }
 
 
