@@ -1,5 +1,7 @@
 """Mock dashboard data with simulated cooldown decay and job progress."""
 
+from __future__ import annotations
+
 import copy
 import json
 import time

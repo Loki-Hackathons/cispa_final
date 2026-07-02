@@ -1,5 +1,7 @@
 """Cluster GPU availability via sinfo."""
 
+from __future__ import annotations
+
 import subprocess
 
 from dashboard.models import ClusterStatus

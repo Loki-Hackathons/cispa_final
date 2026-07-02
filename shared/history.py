@@ -4,6 +4,8 @@ Auto-fed by submit.py / analyze.py. Read from CLI, dashboard, or laptop
 (after scripts/sync_history.ps1). Path override: CISPA_HISTORY_FILE.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os

@@ -1,5 +1,7 @@
 """SLURM queue polling via squeue."""
 
+from __future__ import annotations
+
 import subprocess
 
 from dashboard.models import GpuSummary, SlurmJob

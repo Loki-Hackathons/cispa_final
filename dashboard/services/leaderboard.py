@@ -1,5 +1,7 @@
 """Optional leaderboard polling."""
 
+from __future__ import annotations
+
 from datetime import datetime
 
 import requests

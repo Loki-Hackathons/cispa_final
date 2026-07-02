@@ -1,5 +1,7 @@
 """Pydantic schemas for dashboard API."""
 
+from __future__ import annotations
+
 from pydantic import BaseModel, Field
 
 

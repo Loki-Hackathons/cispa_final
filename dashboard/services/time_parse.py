@@ -1,5 +1,7 @@
 """Parse SLURM time strings to seconds."""
 
+from __future__ import annotations
+
 from datetime import datetime
 
 
