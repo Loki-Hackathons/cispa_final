@@ -134,9 +134,16 @@ def isolated_recovery(
 
     for cl in clusters:
         members = torch.tensor(cl, dtype=torch.long)
-        # Denoise: average the cluster's rgb reconstructions (identical for a
-        # perfectly isolated image; averages out measurement noise otherwise).
-        reps.append(imgs[members].mean(dim=0, keepdim=True))
+        if row_priority is not None and len(cl) > 1:
+            # Use the single highest-priority (most-isolated) member as the
+            # representative — avoids blurring slightly-different images that a
+            # 0.90 fingerprint match may have grouped. Averaging only helped in
+            # the idealised synthetic case; on real data the sharpest member is
+            # the safer choice for SSIM.
+            best = members[int(torch.argmax(row_priority[members]))]
+            reps.append(imgs[best:best + 1])
+        else:
+            reps.append(imgs[members].mean(dim=0, keepdim=True))
 
         size = len(cl)
         if size > 1:
