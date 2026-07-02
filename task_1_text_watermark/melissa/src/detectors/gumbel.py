@@ -31,7 +31,7 @@ def gumbel_scores(token_ids: Sequence[int], cfg: WatermarkConfig,
     """Per-token Gumbel score ``-ln(1 - R_t)`` (first k tokens get 0.0)."""
     if key is None:
         key = _gumbel_key(cfg)
-    k = cfg.context_width
+    k = cfg.gumbel_ngram
     n = len(token_ids)
     out = [0.0] * n
     for t in range(k, n):

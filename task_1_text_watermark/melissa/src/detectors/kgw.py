@@ -28,7 +28,12 @@ def _kgw_key(cfg: WatermarkConfig) -> int:
     keys = cfg.keys or {}
     for name in ("kgw", "red_green", "redgreen"):
         if name in keys:
-            return int(keys[name])
+            val = keys[name]
+            if isinstance(val, int):
+                return val
+            # KGW real config uses a string seeding_scheme, not a scalar key: hash it
+            # to a stable int (approximate; exact KGW needs the vendor detector).
+            return int.from_bytes(hashlib.sha256(str(val).encode()).digest()[:8], "little")
     return 0
 
 
@@ -69,7 +74,7 @@ def kgw_features(token_ids: Sequence[int], cfg: WatermarkConfig,
 
     key = _kgw_key(cfg)
     vocab = int(cfg.vocab_size)
-    gamma = float(cfg.gamma)
+    gamma = float(cfg.kgw_gamma)
     green_size = max(1, int(round(gamma * vocab)))
     k = cfg.context_width
 

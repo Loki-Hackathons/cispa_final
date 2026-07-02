@@ -12,7 +12,9 @@ Run a quick check:  ``python -m src.load_data --check``
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 from . import config
@@ -54,18 +56,40 @@ def _row_to_document(row: dict) -> Document:
     )
 
 
+# Map split name -> file name in the dataset directory.
+_SPLIT_FILE = {"train": "train.jsonl", "validation": "validation.jsonl", "test": "test.jsonl"}
+
+
+def _read_jsonl(path: str) -> list[Document]:
+    docs: list[Document] = []
+    with open(path, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                docs.append(_row_to_document(json.loads(line)))
+    return docs
+
+
 def load_split(split: str) -> list[Document]:
     """Load one split ('train' | 'validation' | 'test') as a list of Document.
 
-    Uses the HuggingFace ``datasets`` library. ``config.DATASET_ID`` may be a hub id
-    or a local path produced by ``hackathon_setup.sh``.
+    Primary source (like the rest of the team): the local ``{split}.jsonl`` file inside
+    ``config.DATASET_DIR`` (HF dataset repo cloned to scratch / ``data/``). If that file is
+    absent, fall back to the HuggingFace ``datasets`` library (``config.DATASET_ID``).
     """
+    alias = {"val": "validation", "valid": "validation", "dev": "validation"}
+    split = alias.get(split, split)
+
+    # 1) Local .jsonl files (train.jsonl / validation.jsonl / test.jsonl).
+    fname = _SPLIT_FILE.get(split, f"{split}.jsonl")
+    local = Path(config.DATASET_DIR) / fname
+    if local.is_file():
+        return _read_jsonl(str(local))
+
+    # 2) Fallback: HuggingFace hub / local dataset dir understood by `datasets`.
     from datasets import load_dataset  # local import: heavy optional dep
 
     config.ensure_dirs()
-    # Normalise split aliases.
-    alias = {"val": "validation", "valid": "validation", "dev": "validation"}
-    split = alias.get(split, split)
     ds = load_dataset(config.DATASET_ID, split=split, cache_dir=str(config.CACHE_DIR))
     return [_row_to_document(row) for row in ds]
 
