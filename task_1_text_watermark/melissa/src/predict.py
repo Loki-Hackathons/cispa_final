@@ -31,10 +31,16 @@ def run(model_path: str, out_path: str | None = None) -> str:
 
     print("[predict] building test features ...")
     test = load_split("test")
+    use_entropy_lm = art.get("use_entropy_lm", True)
+    if config.DISABLE_PROXY_LM:
+        use_entropy_lm = False
+        print("[predict] proxy LM disabled, using novelty proxy only")
     Xte, _, idx_te = build_matrix(
         test, cfg, use_detectors=True,
-        use_entropy_lm=art.get("use_entropy_lm", True), with_labels=False,
+        use_entropy_lm=use_entropy_lm, with_labels=False,
+        progress_every=100, progress_label="predict",
     )
+    print(f"[predict] scoring {Xte.shape[0]} tokens ...")
     raw = model.predict_proba(scaler.transform(Xte))[:, 1]
     pred_by_doc = scores_to_docs(idx_te, raw)
     smoothed = {

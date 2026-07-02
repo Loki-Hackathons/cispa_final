@@ -40,19 +40,31 @@ export WML_DATASET_DIR="$DATA"
 export WML_WATERMARK_YAML="$DATA/watermark_config.yaml"
 export PYTHONPATH="$REPO:$PYTHONPATH"
 
+# No outbound network on JURECA compute nodes: force HF offline and skip the proxy LM
+# entirely (the entropy feature falls back to the offline novelty proxy).
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export WML_DISABLE_PROXY_LM=1
+
 cd "$REPO/task_1_text_watermark/melissa"
 mkdir -p logs outputs
 
 echo "GPU: $(python -c 'import torch; print(torch.cuda.get_device_name(0))' 2>/dev/null || echo 'CPU')"
 
-echo "[1/3] Train calibrator ($MODEL) ..."
-python -u -m src.train_calibrator --model "$MODEL"
+CALIB="outputs/calibrator_${MODEL}.pkl"
+if [ -f "$CALIB" ]; then
+  echo "[1/3] Calibrator already exists ($CALIB) — skipping training."
+  echo "[2/3] Skipping validation eval (calibrator unchanged)."
+else
+  echo "[1/3] Train calibrator ($MODEL) ..."
+  python -u -m src.train_calibrator --model "$MODEL"
 
-echo "[2/3] Evaluate on validation ..."
-python -u -m src.evaluate --pred outputs/val_pred.jsonl --split validation
+  echo "[2/3] Evaluate on validation ..."
+  python -u -m src.evaluate --pred outputs/val_pred.jsonl --split validation
+fi
 
 echo "[3/3] Generate test submission file ..."
-python -u -m src.predict --model "outputs/calibrator_${MODEL}.pkl"
+python -u -m src.predict --model "$CALIB"
 
 echo ""
 echo "=== Done — outputs/submission.jsonl ready for submission ==="

@@ -14,9 +14,23 @@ from __future__ import annotations
 
 from typing import Sequence
 
+from .. import config
 from ..config import ENTROPY_PROXY_MODEL
 
 _MODEL_CACHE: dict = {}
+# Once the proxy LM is unavailable (or explicitly disabled) we remember it so we do
+# NOT retry the (failing) Hugging Face load on every single document.
+_PROXY_DISABLED = False
+_DISABLED_LOGGED = False
+
+
+def _disable_proxy(reason: str) -> None:
+    """Permanently fall back to the novelty proxy and log the reason once."""
+    global _PROXY_DISABLED, _DISABLED_LOGGED
+    _PROXY_DISABLED = True
+    if not _DISABLED_LOGGED:
+        print(f"[entropy] proxy LM disabled, using novelty proxy only ({reason})")
+        _DISABLED_LOGGED = True
 
 
 def _novelty_proxy(token_ids: Sequence[int], window: int = 50) -> list[float]:
@@ -32,13 +46,20 @@ def _novelty_proxy(token_ids: Sequence[int], window: int = 50) -> list[float]:
 
 def entropy_scores(token_ids: Sequence[int], use_proxy_lm: bool = True) -> list[float]:
     """Per-token predictive entropy H_i (nats), or a novelty proxy as fallback."""
+    # Explicitly disabled by caller, by config/env, or by a previous failed attempt.
     if not use_proxy_lm:
+        return _novelty_proxy(token_ids)
+    if config.DISABLE_PROXY_LM:
+        _disable_proxy("WML_DISABLE_PROXY_LM=1")
+        return _novelty_proxy(token_ids)
+    if _PROXY_DISABLED:
         return _novelty_proxy(token_ids)
     try:
         import torch
         from transformers import AutoModelForCausalLM
 
         if not torch.cuda.is_available():
+            _disable_proxy("no CUDA")
             return _novelty_proxy(token_ids)
 
         model = _MODEL_CACHE.get("model")
@@ -59,5 +80,6 @@ def entropy_scores(token_ids: Sequence[int], use_proxy_lm: bool = True) -> list[
         ent[0] = 0.0
         return ent.tolist()
     except Exception as exc:  # noqa: BLE001
-        print(f"[entropy] proxy LM unavailable ({exc}); using novelty proxy.")
+        # Disable permanently so we never retry the failing HF load per-document.
+        _disable_proxy(f"proxy LM unavailable: {exc}")
         return _novelty_proxy(token_ids)

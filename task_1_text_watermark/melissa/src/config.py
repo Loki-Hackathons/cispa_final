@@ -48,6 +48,11 @@ WATERMARK_YAML = os.environ.get(
 # Optional proxy LM for entropy weighting (TextSeal §3.2). Smaller = cheaper.
 ENTROPY_PROXY_MODEL = os.environ.get("WML_ENTROPY_MODEL", "Qwen/Qwen2.5-0.5B")
 
+# Force-disable the proxy LM (no HF/Qwen download, no network). When set, the
+# entropy feature always uses the offline novelty proxy. Useful on JURECA compute
+# nodes where outbound network is blocked.
+DISABLE_PROXY_LM = os.environ.get("WML_DISABLE_PROXY_LM", "0") == "1"
+
 # Submission / API.
 TASK_ID = os.environ.get("WML_TASK_ID", "30-watermark-localization")
 

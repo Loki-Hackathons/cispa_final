@@ -18,11 +18,13 @@ from .load_data import Document
 
 def build_matrix(docs: Iterable[Document], cfg: WatermarkConfig | None = None,
                  use_detectors: bool = True, use_entropy_lm: bool = True,
-                 with_labels: bool = True):
+                 with_labels: bool = True, progress_every: int = 0,
+                 progress_label: str = ""):
     """Concatenate per-token features across docs.
 
     Returns (X, y, doc_index) where doc_index[i] = (document_id, position) so scores can
     be scattered back per document. ``y`` is None when labels are unavailable.
+    ``progress_every`` > 0 prints a progress line every N documents.
     """
     if cfg is None:
         cfg = load_watermark_config()
@@ -30,7 +32,9 @@ def build_matrix(docs: Iterable[Document], cfg: WatermarkConfig | None = None,
     ys: list[int] = []
     doc_index: list[tuple[str, int]] = []
     have_labels = with_labels
-    for d in docs:
+    docs = list(docs)
+    total = len(docs)
+    for i, d in enumerate(docs, 1):
         feats = extract_features(
             d.token_ids, d.token_pieces, cfg=cfg,
             use_detectors=use_detectors, use_entropy_lm=use_entropy_lm,
@@ -42,6 +46,9 @@ def build_matrix(docs: Iterable[Document], cfg: WatermarkConfig | None = None,
             ys.extend(d.labels)
         else:
             have_labels = False
+        if progress_every and (i % progress_every == 0 or i == total):
+            print(f"[{progress_label or 'build_matrix'}] {i}/{total} documents processed",
+                  flush=True)
     X = np.asarray(rows, dtype=np.float64)
     y = np.asarray(ys, dtype=np.int64) if (have_labels and ys) else None
     return X, y, doc_index
