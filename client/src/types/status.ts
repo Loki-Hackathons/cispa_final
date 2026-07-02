@@ -135,6 +135,7 @@ export interface DashboardStatus {
   owners: OwnerSummary[];
   cluster: ClusterStatus | null;
   leaderboard: LeaderboardRow[];
+  leaderboard_page_url?: string;
   warnings: string[];
 }
 

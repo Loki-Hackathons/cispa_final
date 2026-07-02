@@ -101,7 +101,7 @@ export default function App() {
             <div className="space-y-6">
               <CooldownPanel tasks={data?.tasks ?? []} />
               <ScoresPanel tasks={data?.tasks ?? []} />
-              <LeaderboardPanel rows={data?.leaderboard ?? []} />
+              <LeaderboardPanel rows={data?.leaderboard ?? []} pageUrl={data?.leaderboard_page_url} />
             </div>
           </div>
 

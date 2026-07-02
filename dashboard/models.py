@@ -142,6 +142,7 @@ class DashboardStatus(BaseModel):
     owners: list[OwnerSummary] = Field(default_factory=list)
     cluster: ClusterStatus | None = None
     leaderboard: list[LeaderboardRow] = Field(default_factory=list)
+    leaderboard_page_url: str = ""
     warnings: list[str] = Field(default_factory=list)
 
 

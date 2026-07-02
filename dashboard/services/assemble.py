@@ -15,7 +15,7 @@ from dashboard.services.commands import (
 )
 from dashboard.services.cooldowns import fetch_task_statuses
 from dashboard.services.job_merge import merge_job_progress
-from dashboard.services.leaderboard import fetch_leaderboard
+from dashboard.services.leaderboard import fetch_leaderboard, leaderboard_from_team_state
 from dashboard.services.owners import build_owner_summaries
 from dashboard.services.queue_plan import enrich_jobs, normalize_state
 from dashboard.services.sacct import fetch_failed_jobs
@@ -72,14 +72,20 @@ def assemble_status(
     else:
         cluster = cluster_data
 
-    if leaderboard_data is None and mode == "live" and config.leaderboard_url:
-        api_key = os.environ.get("CISPA_API_KEY")
-        leaderboard, w = fetch_leaderboard(
-            config.leaderboard_url,
-            config.leaderboard_task_ids,
-            api_key=api_key,
-        )
-        warnings.extend(w)
+    if leaderboard_data is None and mode == "live":
+        leaderboard = leaderboard_from_team_state(config.leaderboard_task_ids)
+        if config.leaderboard_poll_url:
+            api_key = os.environ.get("CISPA_API_KEY")
+            polled, w = fetch_leaderboard(
+                config.leaderboard_poll_url,
+                config.leaderboard_task_ids,
+                api_key=api_key,
+            )
+            warnings.extend(w)
+            if polled and not w:
+                leaderboard = polled
+    elif leaderboard_data is None:
+        leaderboard = []
     else:
         leaderboard = leaderboard_data or []
 
@@ -100,5 +106,6 @@ def assemble_status(
         owners=owners,
         cluster=cluster,
         leaderboard=leaderboard,
+        leaderboard_page_url=config.leaderboard_page_url,
         warnings=warnings,
     )

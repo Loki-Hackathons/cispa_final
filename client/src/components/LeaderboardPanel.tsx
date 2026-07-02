@@ -18,27 +18,32 @@ import { cn } from "@/lib/utils";
 
 interface LeaderboardPanelProps {
   rows: LeaderboardRow[];
+  pageUrl?: string;
 }
 
 const HEAD = "font-mono text-[10px] uppercase tracking-wider text-muted-foreground";
 
-export function LeaderboardPanel({ rows }: LeaderboardPanelProps) {
+export function LeaderboardPanel({ rows, pageUrl }: LeaderboardPanelProps) {
   if (rows.length === 0) return null;
+
+  const href = pageUrl || "http://35.192.205.84/leaderboard_page";
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Leaderboard</CardTitle>
         <CardDescription>
-          Team ranks from dashboard state ·{" "}
+          Live: best team score from <code className="font-mono text-xs">team_state.json</code> after
+          API submits. Rank/gap:{" "}
           <a
-            href="http://35.192.205.84/leaderboard_page"
+            href={href}
             className="text-primary underline-offset-2 hover:underline"
             target="_blank"
             rel="noreferrer"
           >
-            full leaderboard
+            organizer page
           </a>
+          .
         </CardDescription>
       </CardHeader>
       <CardContent className="px-0">

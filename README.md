@@ -10,7 +10,7 @@ First-time setup: see [Setup](#setup-first-time) below.
 
 ```bash
 ssh -i ~/.ssh/id_ed25519 -o Ciphers=aes256-ctr -o MACs=hmac-sha2-256-etm@openssh.com <user>@jureca.fz-juelich.de
-jutil env activate -p training2557
+jutil env activate -p training2625
 cd /p/home/jusers/<user>/jureca/code/cispa_final
 module load GCC CUDA PyTorch torchvision
 source .venv/bin/activate
@@ -51,6 +51,25 @@ Deactivate when done: `deactivate`
 
 > `.venv/` is gitignored. Local PyTorch installs as CPU-only by default; CUDA builds are handled on the cluster via modules + `uv`.
 
+### Task 1 dataset (local)
+
+Clone into `data/` (gitignored, see [data/README.md](data/README.md)):
+
+```powershell
+cd data
+git lfs install
+git clone https://huggingface.co/datasets/SprintML/watermark_localization
+```
+
+Browse **all labeled docs** (train + val, ground truth highlighted):
+
+```powershell
+python scripts/task1/view_dataset.py
+# → http://127.0.0.1:8765
+```
+
+Cluster copy: `/p/scratch/training2625/ansart1/loki/watermark_localization/`. One-shot owner setup: `scripts/cluster/setup_task1_only.sh`.
+
 ## Repo map
 
 ```
@@ -63,7 +82,10 @@ cispa_final/
 │   └── hackathon-start-guide.md
 ├── dashboard/                 # FastAPI backend (mock | live)
 ├── client/                    # React browser UI
-├── scripts/build_dashboard.sh
+├── scripts/
+│   ├── task1/view_dataset.py  # Local GT browser (train/val)
+│   └── cluster/setup_task1_only.sh
+├── data/                      # HF dataset clones (gitignored) — see data/README.md
 ├── slurm/templates/           # 1/2/4 GPU job templates
 ├── shared/
 │   ├── submit.py              # API submission
@@ -91,40 +113,94 @@ python shared/analyze.py output/submission.npz --task-id <TASK_ID> --mode api --
 
 # SLURM
 sbatch slurm/templates/2gpu_devel.sh
-squeue -A training2557
+squeue -A training2625
 ```
 
-### Team dashboard (browser)
+## Team dashboard (browser)
 
-Edit `dashboard/config.py` → `MODE = "mock"` (local) or `"live"` (cluster). Optional: `LEADERBOARD_URL`, `LEADERBOARD_TASK_IDS`.
+Ops UI: SLURM queue, cooldowns, scores, Task 1 token viewer, failed jobs. Two modes:
 
-Features: next actions, job progress/ETA, failed jobs, cluster GPUs, score deltas, command copy chips.
+| Mode | Where | Config |
+|------|-------|--------|
+| **mock** | Laptop | Default — no `config_local.py` |
+| **live** | JURECA | `dashboard/config_local.py` with `MODE = "live"` |
 
-Long GPU jobs must use `shared/job_progress.py` — see skill `job-progress` and [docs/dashboard-roadmap.md](docs/dashboard-roadmap.md).
+**Do not** edit `dashboard/config.py` on the cluster — use gitignored `config_local.py` (see `dashboard/config_local.py.example`).
+
+### Laptop (mock)
+
+```powershell
+cd cispa_final
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r dashboard\requirements.txt
+.\scripts\build_dashboard.ps1          # builds client/dist (once per UI change)
+.\scripts\run_dashboard.ps1            # or: python -m uvicorn dashboard.server:app --host 127.0.0.1 --port 8080
+```
+
+Open http://127.0.0.1:8080 — yellow “Mock data” banner is expected.
+
+Details: [docs/dashboard-mock-test.md](docs/dashboard-mock-test.md)
+
+### JURECA (live)
+
+**One-time venv** (login node — no GPU needed for the dashboard):
 
 ```bash
-# Local dev (mock data)
-bash scripts/build_dashboard.sh          # once: builds client/
-uvicorn dashboard.server:app --host 127.0.0.1 --port 8080
-# → http://127.0.0.1:8080
-
-# Dev with hot reload (two terminals)
-# T1: uvicorn dashboard.server:app --reload --port 8080
-# T2: cd client && npm run dev   → http://localhost:5173
-
-# On cluster (live data) — set MODE = "live" in config.py, run in tmux
-uvicorn dashboard.server:app --host 127.0.0.1 --port 8080
-
-# On laptop — SSH tunnel to see cluster dashboard in browser
-ssh -L 8080:localhost:8080 <user>@jureca.fz-juelich.de
-# → http://localhost:8080
+jutil env activate -p training2625
+cd /p/home/jusers/ansart1/jureca/code/cispa_final
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r dashboard/requirements.txt
+cp dashboard/config_local.py.example dashboard/config_local.py   # MODE=live, gitignored
 ```
 
-Windows shortcut: `.\scripts\run_dashboard.ps1` — see [docs/dashboard-mock-test.md](docs/dashboard-mock-test.md).
+**Each session** (keep alive in tmux):
 
-Terminal fallback: `python shared/dashboard.py` (uses same `dashboard/config.py`).
+```bash
+jutil env activate -p training2625
+cd /p/home/jusers/ansart1/jureca/code/cispa_final
+source .venv/bin/activate
+tmux new -s dash    # or: tmux attach -t dash
+python -m uvicorn dashboard.server:app --host 127.0.0.1 --port 8080
+```
 
-## Setup (first time)
+**Build the React UI on your laptop** (npm is not on JURECA login nodes), then copy `client/dist` once:
+
+```powershell
+cd cispa_final
+.\scripts\build_dashboard.ps1
+scp -i $env:USERPROFILE\.ssh\id_ed25519 -r client/dist ansart1@jureca.fz-juelich.de:/p/home/jusers/ansart1/jureca/code/cispa_final/client/
+```
+
+**SSH tunnel from laptop** (leave this terminal open):
+
+```powershell
+ssh -i $env:USERPROFILE\.ssh\id_ed25519 -L 8080:127.0.0.1:8080 ansart1@jureca.fz-juelich.de
+```
+
+Open http://localhost:8080 — header should show **live** (no mock banner).
+
+**Verify API:**
+
+```bash
+curl -s http://127.0.0.1:8080/api/health
+# {"ok":true,"mode":"live"}
+```
+
+**Sync repo after git pull** (cluster only — never commit/push from JURECA):
+
+```bash
+bash scripts/cluster/sync_repo_from_github.sh
+```
+
+**Leaderboard panel:** shows your best scores from `team_state.json` after `shared/submit.py` runs. Full rankings: http://35.192.205.84/leaderboard_page (no JSON poll — avoids 404 spam).
+
+**Terminal fallback:** `python shared/dashboard.py` (Rich TUI, same config).
+
+---
+
+## Common commands
 
 ### Cluster (JURECA)
 

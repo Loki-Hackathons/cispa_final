@@ -20,9 +20,16 @@ PROGRESS_STALE_SECONDS = 120
 SACCT_HOURS = 6
 COOLDOWN_SOON_SECONDS = 60
 
-# Leaderboard UI (external page); rows still come from team_state / mock fixtures
-LEADERBOARD_URL = "http://35.192.205.84/leaderboard_page"
-LEADERBOARD_TASK_IDS: list[str] = ["task_1", "task_2", "task_3"]
+# Human-readable leaderboard (HTML — open in browser)
+LEADERBOARD_PAGE_URL = "http://35.192.205.84/leaderboard_page"
+# Optional JSON poll base (CISPA_BASE_URL). Leave empty — no public /leaderboard/* API today.
+LEADERBOARD_POLL_URL = ""
+# API task ids for team_state / submit.py (not task_1, task_2, …)
+LEADERBOARD_TASK_IDS: list[str] = [
+    "30-watermark-localization",
+    "29-mgi",
+    "21-fl-audit",
+]
 
 _OVERRIDE_KEYS = (
     "MODE",
@@ -37,7 +44,8 @@ _OVERRIDE_KEYS = (
     "PROGRESS_STALE_SECONDS",
     "SACCT_HOURS",
     "COOLDOWN_SOON_SECONDS",
-    "LEADERBOARD_URL",
+    "LEADERBOARD_PAGE_URL",
+    "LEADERBOARD_POLL_URL",
     "LEADERBOARD_TASK_IDS",
 )
 
@@ -78,7 +86,8 @@ class DashboardConfig:
     progress_stale_seconds: int
     sacct_hours: int
     cooldown_soon_seconds: int
-    leaderboard_url: str
+    leaderboard_page_url: str
+    leaderboard_poll_url: str
     leaderboard_task_ids: tuple[str, ...]
 
 
@@ -99,6 +108,7 @@ def load_config() -> DashboardConfig:
         progress_stale_seconds=PROGRESS_STALE_SECONDS,
         sacct_hours=SACCT_HOURS,
         cooldown_soon_seconds=COOLDOWN_SOON_SECONDS,
-        leaderboard_url=LEADERBOARD_URL.strip(),
+        leaderboard_page_url=LEADERBOARD_PAGE_URL.strip(),
+        leaderboard_poll_url=LEADERBOARD_POLL_URL.strip(),
         leaderboard_task_ids=tuple(LEADERBOARD_TASK_IDS),
     )
