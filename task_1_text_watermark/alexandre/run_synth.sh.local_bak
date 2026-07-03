@@ -1,0 +1,39 @@
+#!/bin/bash
+#SBATCH --account=training2625
+#SBATCH --partition=dc-gpu
+#SBATCH --reservation=cispahack
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=8
+#SBATCH --time=05:00:00
+#SBATCH --job-name=task1_synth_ansart1
+#SBATCH --output=logs/slurm_%j.out
+#SBATCH --error=logs/slurm_%j.err
+
+# Task 1 workstream D (docs/task1/roadmap.md): generate synthetic labeled
+# docs with the exact keys + vendor code + 7B generator, then recompute the
+# detection-side arrays (KGW mask, doc-only entropy) with production
+# semantics. Produces output/synth.jsonl + output/{kgw,entropy}_synth.npz.
+#
+# Override sampling params if validate_synth.py reports a mismatch:
+#   sbatch --export=ALL,TEMPERATURE=0.8,TOP_P=0.95 run_synth.sh
+
+set -euo pipefail
+
+module load GCC CUDA PyTorch torchvision
+export HF_HOME="${HF_HOME:-/p/scratch/training2625/ansart1/loki/hf_cache}"
+
+REPO_ROOT="${REPO_ROOT:-/p/home/jusers/${USER}/jureca/code/cispa_final}"
+DATA_DIR="${DATA_DIR:-/p/scratch/training2625/ansart1/loki/watermark_localization}"
+N_DOCS="${N_DOCS:-1000}"
+TEMPERATURE="${TEMPERATURE:-1.0}"
+TOP_P="${TOP_P:-1.0}"
+cd "$REPO_ROOT/task_1_text_watermark/alexandre"
+mkdir -p logs output
+
+echo "Job ID: $SLURM_JOB_ID | Node: $SLURM_NODELIST | T=$TEMPERATURE top_p=$TOP_P n=$N_DOCS"
+nvidia-smi --query-gpu=index,name,memory.total --format=csv
+
+python -u gen_synth.py --data-dir "$DATA_DIR" --out-dir output \
+    --n-docs "$N_DOCS" --temperature "$TEMPERATURE" --top-p "$TOP_P"
