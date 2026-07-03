@@ -16,7 +16,13 @@ TOTAL_IMAGES = 1800
 CLASS_SIZE = 300
 
 # Submission slot layout: (name, slot_start, source_start, count, attack_mode)
-# attack_mode: "original" | "to_G" | "from_G"
+# attack_mode (LEGACY run_attack.py / cw_attack.py, Stage-1 only):
+#   "original" | "to_G" | "from_G"
+# WARNING: this legacy layout does NOT drive Stage-2 (M/N). It leaves M_N and
+# N_M as unmodified originals (score 0) and cannot distinguish G_M from G_N.
+# The authoritative per-cell targets live in DIRECTION_TARGETS below and are
+# implemented by attack_combined.py. cw_attack/run_attack are kept only for the
+# "*->G" directions (Stage-1 is sufficient there).
 DIRECTION_BLOCKS: list[tuple[str, int, int, int, str]] = [
     ("M_N", 0, 0, CLASS_SIZE, "original"),
     ("M_G", 300, 0, CLASS_SIZE, "to_G"),
@@ -25,6 +31,26 @@ DIRECTION_BLOCKS: list[tuple[str, int, int, int, str]] = [
     ("G_M", 1200, 600, CLASS_SIZE, "from_G"),
     ("G_N", 1500, 600, CLASS_SIZE, "from_G"),
 ]
+
+# Authoritative detector-cell targets per direction:
+#   (source_class, slot_start, stage1_target, stage2_target)
+#   stage1_target: "generate" (L_A < tau_G) | "natural" (L_A > tau_G)
+#   stage2_target: "raise" (member) | "lower" (non-member) | "off"
+DIRECTION_TARGETS: dict[str, tuple[str, int, str, str]] = {
+    "M_N": ("M", 0, "natural", "lower"),
+    "M_G": ("M", 300, "generate", "off"),
+    "N_M": ("N", 600, "natural", "raise"),
+    "N_G": ("N", 900, "generate", "off"),
+    "G_M": ("G", 1200, "natural", "raise"),
+    "G_N": ("G", 1500, "natural", "lower"),
+}
+
+# Directions whose Stage-1-only attack (cw_attack.py) is a faithful full solution
+# (Stage 2 is irrelevant because Stage 1 already assigns the class).
+STAGE1_ONLY_DIRECTIONS = ("M_G", "N_G")
+# Directions that REQUIRE attack_combined.py (Stage-2 controlled) or a content
+# swap fallback; the legacy cw_attack pipeline cannot solve them correctly.
+STAGE2_REQUIRED_DIRECTIONS = ("M_N", "N_M", "G_M", "G_N")
 
 P0_DIRECTIONS = ("M_G", "N_G", "G_M", "G_N")
 V1_ATTACK_DIRECTIONS = P0_DIRECTIONS

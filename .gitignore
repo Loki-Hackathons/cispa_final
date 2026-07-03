@@ -3,6 +3,8 @@
 .env.*
 !.env.example
 task_3_fl_reconstruction/**/.env
+# Organizer onboarding message — contains the team API token
+docs/consignes et soumissions.txt
 
 # Dashboard cluster override (see dashboard/config_local.py.example)
 dashboard/config_local.py

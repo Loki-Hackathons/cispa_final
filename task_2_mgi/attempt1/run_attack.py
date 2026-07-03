@@ -197,6 +197,20 @@ def main() -> int:
     setup_oned_tokenizer_path(paths.oned_tokenizer_root)
     paths.output_dir.mkdir(parents=True, exist_ok=True)
 
+    directions_arg = tuple(d.strip() for d in args.directions.split(",") if d.strip())
+    stage2_needed = [d for d in directions_arg
+                     if d in ("M_N", "N_M", "G_M", "G_N")]
+    if args.phase in ("attack", "all") and stage2_needed:
+        print(
+            "WARNING: run_attack.py is Stage-1 only. Directions "
+            f"{stage2_needed} need Stage-2 control (M/N) and are NOT solved here:\n"
+            "  - M_N / N_M are left as UNMODIFIED originals (score 0).\n"
+            "  - G_M / G_N share the same objective and cannot both be correct.\n"
+            "Use attack_combined.py for these directions, then assemble with\n"
+            "build_submission_v2.py. run_attack.py is faithful only for M_G, N_G.",
+            file=sys.stderr,
+        )
+
     cfg = AttackConfig()
     if args.device:
         cfg.device = args.device
