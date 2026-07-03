@@ -247,6 +247,31 @@ CONFIGS = {
                                            edge_prior=np.log(0.005),
                                            isotonic_llr=True, use_exact=True,
                                            exact_mix_weight=0.03),
+    # Point 3: multi-scale geometric local z + boundary smoother (TextSeal
+    # localized_detect pattern, continuous boost on SMM log-odds)
+    "b50_ps2_elo_entbin5_iso_ms02": dict(emission_mode="binned_ent", n_ent_bins=5,
+                                         n_bins=50, clip=4.0, p_span_scale=2.0,
+                                         edge_prior=np.log(0.005),
+                                         isotonic_llr=True, multiscale_weight=0.2),
+    "b50_ps2_elo_entbin5_iso_ms05": dict(emission_mode="binned_ent", n_ent_bins=5,
+                                         n_bins=50, clip=4.0, p_span_scale=2.0,
+                                         edge_prior=np.log(0.005),
+                                         isotonic_llr=True, multiscale_weight=0.5),
+    "b50_ps2_elo_entbin5_iso_bnd20": dict(emission_mode="binned_ent", n_ent_bins=5,
+                                          n_bins=50, clip=4.0, p_span_scale=2.0,
+                                          edge_prior=np.log(0.005),
+                                          isotonic_llr=True, boundary_window=20,
+                                          boundary_weight=0.3),
+    "b50_ps2_elo_entbin5_iso_ms_bnd": dict(emission_mode="binned_ent", n_ent_bins=5,
+                                           n_bins=50, clip=4.0, p_span_scale=2.0,
+                                           edge_prior=np.log(0.005),
+                                           isotonic_llr=True, multiscale_weight=0.2,
+                                           boundary_window=20, boundary_weight=0.2),
+    # Point 2: fit augmented with synthetic labeled spans (synthetic_train.jsonl)
+    "b50_ps2_elo_entbin5_iso_synth": dict(emission_mode="binned_ent", n_ent_bins=5,
+                                          n_bins=50, clip=4.0, p_span_scale=2.0,
+                                          edge_prior=np.log(0.005),
+                                          isotonic_llr=True, use_synthetic=True),
 }
 
 
@@ -286,6 +311,34 @@ def load_p_target(splits=("train", "validation")):
             logp = npz[k].astype(np.float64)
             pt[k] = np.where(logp > 0.5, -1.0, np.exp(logp))
     return pt
+
+
+def load_p_target_tag(tag, splits=("train", "validation")):
+    """Like load_p_target but reads calib_{tag}_{split}.npz (calib_pass.py)."""
+    pt = {}
+    for split in splits:
+        path = KGW_DIR / f"calib_{tag}_{split}.npz"
+        if not path.exists():
+            return None
+        npz = np.load(path)
+        for k in npz.files:
+            logp = npz[k].astype(np.float64)
+            pt[k] = np.where(logp > 0.5, -1.0, np.exp(logp))
+    return pt
+
+
+def load_synthetic():
+    """Synthetic labeled docs + entropy (gen_synthetic.py output), or ([], None)."""
+    path = KGW_DIR / "synthetic_train.jsonl"
+    if not path.exists():
+        return [], None
+    docs = read_jsonl(path)
+    ent_path = KGW_DIR / "entropy_synth.npz"
+    if not ent_path.exists():
+        return docs, None
+    npz = np.load(ent_path)
+    ent = {k: npz[k].astype(np.float64) for k in npz.files}
+    return docs, ent
 
 
 def load_lpg(splits=("train", "validation")):
@@ -343,11 +396,19 @@ def _needs_lpg(kwargs):
 
 
 def eval_config(name, docs, kgw, cache, entropy=None, exact_cache=None,
-                p_target=None, lpg=None):
+                p_target=None, lpg=None, synthetic_docs=None, synth_entropy=None):
     kwargs = CONFIGS[name]
-    needs_entropy = _needs_entropy(kwargs)
-    needs_exact = _needs_exact(kwargs)
-    needs_lpg = _needs_lpg(kwargs)
+    if kwargs is None:
+        kwargs = {}
+    else:
+        kwargs = dict(kwargs)
+    use_synthetic = kwargs.pop("use_synthetic", False)
+    needs_entropy = _needs_entropy(kwargs if kwargs else None)
+    needs_exact = _needs_exact(kwargs if kwargs else None)
+    needs_lpg = _needs_lpg(kwargs if kwargs else None)
+    if use_synthetic and not synthetic_docs:
+        print(f"{name:24s} SKIPPED (synthetic_train.jsonl missing)", flush=True)
+        return None
     if needs_entropy and entropy is None:
         print(f"{name:24s} SKIPPED (entropy npz missing)", flush=True)
         return None
@@ -365,12 +426,17 @@ def eval_config(name, docs, kgw, cache, entropy=None, exact_cache=None,
     t0 = time.time()
     for fi, fold in enumerate(folds):
         held = set(fold.tolist())
-        if kwargs is None:
+        if not kwargs:
             params = default_params()
         else:
             fit_docs = [docs[i] for i in range(len(docs)) if i not in held]
+            ent_fit = entropy
+            if use_synthetic and synth_entropy is not None:
+                ent_fit = dict(entropy) if entropy else {}
+                ent_fit.update(synth_entropy)
             params = fit_params(fit_docs, kgw=kgw, signal_cache=cache,
-                                entropy_cache=entropy if needs_entropy else None,
+                                entropy_cache=ent_fit if needs_entropy else None,
+                                synthetic_docs=synthetic_docs if use_synthetic else None,
                                 **kwargs)
         for i in fold:
             rec = docs[i]
@@ -392,10 +458,15 @@ def eval_config(name, docs, kgw, cache, entropy=None, exact_cache=None,
 def run_final(config, out_path):
     docs, kgw = load_labeled()
     cache = build_cache(docs, kgw)
-    kwargs = CONFIGS[config]
-    needs_entropy = _needs_entropy(kwargs)
-    needs_exact = _needs_exact(kwargs)
-    needs_lpg = _needs_lpg(kwargs)
+    raw = CONFIGS[config]
+    if raw is None:
+        kwargs = {}
+    else:
+        kwargs = dict(raw)
+    kwargs.pop("use_synthetic", None)
+    needs_entropy = _needs_entropy(kwargs if kwargs else None)
+    needs_exact = _needs_exact(kwargs if kwargs else None)
+    needs_lpg = _needs_lpg(kwargs if kwargs else None)
     entropy = load_entropy() if needs_entropy else None
     if needs_entropy and entropy is None:
         raise SystemExit("entropy npz missing for labeled splits")
@@ -403,7 +474,7 @@ def run_final(config, out_path):
     if needs_exact and p_target is None:
         raise SystemExit("logp npz missing for labeled splits")
     exact_cache = build_exact_cache(docs) if needs_exact else None
-    params = (default_params() if kwargs is None
+    params = (default_params() if not kwargs
               else fit_params(docs, kgw=kgw, signal_cache=cache,
                               entropy_cache=entropy, **kwargs))
 
@@ -435,6 +506,7 @@ def run_final(config, out_path):
                                 p_target=pt, lpg=lpg_doc)
             f.write(json.dumps({"document_id": rec["document_id"],
                                 "scores": [float(s) for s in sc]}) + "\n")
+            f.flush()
             if (i + 1) % 100 == 0:
                 print(f"  {i + 1}/{len(test)} ({(i + 1) / (time.time() - t0):.1f} docs/s)",
                       flush=True)
@@ -456,6 +528,12 @@ def main():
     docs, kgw = load_labeled()
     print(f"{len(docs)} labeled docs; building signal cache...", flush=True)
     cache = build_cache(docs, kgw)
+    synth_docs, synth_ent = load_synthetic()
+    if synth_docs:
+        print(f"+ {len(synth_docs)} synthetic docs for fit augmentation", flush=True)
+        for rec in synth_docs:
+            did = str(rec["document_id"])
+            cache[did] = doc_signals(rec["token_ids"])
     entropy = load_entropy()
     p_target = load_p_target()
     lpg = load_lpg()
@@ -465,7 +543,8 @@ def main():
     results = {}
     for name in names:
         r = eval_config(name, docs, kgw, cache, entropy=entropy,
-                        exact_cache=exact_cache, p_target=p_target, lpg=lpg)
+                        exact_cache=exact_cache, p_target=p_target, lpg=lpg,
+                        synthetic_docs=synth_docs, synth_entropy=synth_ent)
         if r is not None:
             results[name] = r
     best = max(results, key=results.get)

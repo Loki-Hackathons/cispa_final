@@ -204,9 +204,15 @@ def fit_params(docs, kgw=None, signal_cache=None, emission_mode="binned",
                forbid_adjacent_spans=False, isotonic_llr=False,
                mix_from_prevalence=False,
                use_exact_kgw=False, use_exact_unigram=False,
-               exact_mix_weight=None) -> SmmParams:
+               exact_mix_weight=None,
+               multiscale_weight=0.0, multiscale_min_len=24,
+               boundary_window=0, boundary_threshold=0.0, boundary_weight=0.0,
+               synthetic_docs=None) -> SmmParams:
+    fit_docs = list(docs)
+    if synthetic_docs:
+        fit_docs = fit_docs + list(synthetic_docs)
     h1, h0, span_lengths, stats, h1_ent, h0_ent = collect_pools(
-        docs, kgw, signal_cache,
+        fit_docs, kgw, signal_cache,
         entropy_cache=entropy_cache if (entropy_kind or n_ent_bins) else None)
 
     if fit_priors:
@@ -304,4 +310,9 @@ def fit_params(docs, kgw=None, signal_cache=None, emission_mode="binned",
                      entropy_lo=ent_lo, entropy_hi=ent_hi,
                      entropy_floor=entropy_floor,
                      forbid_adjacent_spans=forbid_adjacent_spans,
-                     mix_log_weights=mix_log_weights)
+                     mix_log_weights=mix_log_weights,
+                     multiscale_weight=multiscale_weight,
+                     multiscale_min_len=multiscale_min_len,
+                     boundary_window=boundary_window,
+                     boundary_threshold=boundary_threshold,
+                     boundary_weight=boundary_weight)

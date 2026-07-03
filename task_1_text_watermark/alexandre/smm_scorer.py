@@ -26,6 +26,7 @@ from scipy.special import logsumexp
 
 from detectors import (GUMBEL_NGRAM, H0_MOMENTS, TEXTSEAL_ALPHA, TEXTSEAL_NGRAM,
                        _dedup_mask, compute_signals, gumbelmax_r, textseal_r)
+from multiscale import boundary_smooth, token_multiscale_z
 from unigram_scan import REAL_KEY, VOCAB_SIZE, greenlist_mask, token_dedup_mask
 
 KGW_CONTEXT = 3  # ff-anchored_minhash_prf-4 self-salt: 3 context + 1 target
@@ -115,6 +116,13 @@ class SmmParams:
     # prevalence among labeled spans is ~41/36/22% GM/TS/KGW, not 1/n_hyp
     # each). name -> raw weight (renormalized internally); None = uniform.
     mix_log_weights: dict[str, float] | None = None
+    # multi-scale geometric local z on per-token max-LLR (TextSeal cover search)
+    multiscale_weight: float = 0.0
+    multiscale_min_len: int = 24
+    # boundary smoother boost on final log-odds (moving average)
+    boundary_window: int = 0
+    boundary_threshold: float = 0.0
+    boundary_weight: float = 0.0
 
 
 def entropy_weights(entropy: np.ndarray, p: SmmParams) -> np.ndarray:
@@ -468,6 +476,15 @@ def score_document(token_ids, extra=None, temperature=40.0,
             n, p, span_w, lp_edge, ls_edge, log_p_clean)
         log_m_clean = np.minimum(log_m_clean, -1e-12)
         log_odds = np.log1p(-np.exp(log_m_clean)) - log_m_clean
+        if p.multiscale_weight > 0.0 and hyp:
+            stack = np.stack(hyp, axis=0)
+            local_sig = stack.max(axis=0)
+            ms_z = token_multiscale_z(local_sig, min_length=p.multiscale_min_len)
+            log_odds = log_odds + p.multiscale_weight * ms_z
+        if p.boundary_window > 0 and p.boundary_weight > 0.0:
+            boost = boundary_smooth(log_odds, window=p.boundary_window,
+                                    threshold=p.boundary_threshold)
+            log_odds = log_odds + p.boundary_weight * boost
         return 1.0 / (1.0 + np.exp(-log_odds / temperature))
 
     # forward (target-side accumulation)
@@ -511,4 +528,16 @@ def score_document(token_ids, extra=None, temperature=40.0,
     log_m_clean = alpha[:n] + log_p_clean + beta[1:] - log_z
     log_m_clean = np.minimum(log_m_clean, -1e-12)
     log_odds = np.log1p(-np.exp(log_m_clean)) - log_m_clean
+
+    if p.multiscale_weight > 0.0 and hyp:
+        # per-token max LLR across active hypotheses (spatial evidence)
+        stack = np.stack(hyp, axis=0)
+        local_sig = stack.max(axis=0)
+        ms_z = token_multiscale_z(local_sig, min_length=p.multiscale_min_len)
+        log_odds = log_odds + p.multiscale_weight * ms_z
+    if p.boundary_window > 0 and p.boundary_weight > 0.0:
+        boost = boundary_smooth(log_odds, window=p.boundary_window,
+                                threshold=p.boundary_threshold)
+        log_odds = log_odds + p.boundary_weight * boost
+
     return 1.0 / (1.0 + np.exp(-log_odds / temperature))

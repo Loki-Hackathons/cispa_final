@@ -6,6 +6,20 @@
 
 ---
 
+## État actuel (2026-07-03, matin)
+
+| Élément | Statut |
+| -------- | ------ |
+| **Soumission #994 (entropie 7B + isotonic, baseline prod)** | **score public 0.349 — best actuel** |
+| Soumission #1513 (idem + multiscale geometric z, w=0.2) | score public **0.3364** — **négatif** vs #994 (§20.3) |
+| Calibration T/top-p exact LLR (grille 9 points, `calib_pass.py`) | ❌ **négatif** — meilleur = T=1/p=1 (= raw), exact dans le pipeline dégrade encore le CV (§20.1) |
+| Multiscale geometric cover (`multiscale.py`, Point 3) | ❌ **négatif sur public** malgré léger gain CV (+0.3 pt) — rejeté (§20.3) |
+| Génération synthétique (`gen_synthetic.py`, Point 2) | ⚙️ code + intégration fit prêts ; job GPU JURECA **en attente** (SSH/TOTP) (§20.2) |
+
+**Pipeline de production inchangé :** `cv_smm.py --final b50_ps2_elo_entbin5_iso` (#994, public 0.349).
+
+---
+
 ## État actuel (2026-07-02, nuit)
 
 | Élément | Statut |
@@ -594,8 +608,88 @@ Toutes les pistes testées dans cette section (exact KGW, exact Unigram, poids r
 
 Pistes restantes non explorées ici, par ROI décroissant :
 
-1. **Calibration température/top-p du détecteur exact** (agent parallèle) — seul chemin identifié pour débloquer la vraisemblance exacte Gumbel/TextSeal ; gain potentiel important vu l'écart CV actuel (0.35 vs 0.43 sans elle) suggère qu'une fois calibrée, elle pourrait dépasser le binned+entropie pur.
-2. **Données synthétiques massives** (agent parallèle, en cours) — seul levier qui adresse structurellement les 34 % de spans courts sans signal exploitable (§17) et permettrait de vérifier/calibrer les hypothèses de température/top-p par maximum de vraisemblance sur des milliers de spans au lieu de ~180 documents.
-3. **Vérification indépendante de `KGW_VOCAB_SIZE=151665` et `delta=1.5`** au-delà du probe déjà fait (§8) — le fait que le signal KGW réalisé (H1 green rate ≈ 0.30 contre H0 ≈ 0.25, effet faible) reste stable après toutes nos corrections suggère soit un effet réellement faible, soit un paramètre encore imprécis ; non vérifiable sans nouvelle preuve externe (au-delà du scope de cette session).
+1. ~~**Calibration température/top-p du détecteur exact**~~ → **testé §20.1, négatif** — ne pas réinvestir.
+2. **Données synthétiques massives** — code prêt (`gen_synthetic.py`, §20.2) ; job GPU JURECA en attente.
+3. ~~**Couverture géométrique multi-échelle**~~ → **testé §20.3, négatif sur public** — ne pas réinvestir.
+4. **Vérification indépendante de `KGW_VOCAB_SIZE=151665` et `delta=1.5`** au-delà du probe déjà fait (§8).
 
 **Fichiers modifiés :** `smm_scorer.py` (`green_exact_llr`, kinds `kgw_exact`/`unigram_exact`, `Emission.boost`), `fit_smm.py` (`use_exact_kgw`, `use_exact_unigram`, `exact_mix_weight`), `cv_smm.py` (`load_lpg`, configs `*_kgwx`/`*_unix`/`*_bothx`/`*_allx`/`*_exw*`).
+
+---
+
+## 20. Points 1–3 (session 2026-07-03) : calibration exact, synthèse, couverture géométrique
+
+Traitement autonome des trois pistes §19.4. Résumé : **Point 1 fermé (négatif)** ; **Point 3 testé et rejeté sur public** ; **Point 2 code prêt, génération GPU bloquée par accès JURECA**.
+
+### 20.1 Point 1 — Calibration température / top-p pour l'exact LLR (négatif, piste fermée)
+
+**Hypothèse :** la génération réelle applique softmax(logits/T) + nucleus top-p avant le Gumbel-max ; utiliser `p_target = softmax(logits)[token]` (T=1, pas de top-p) fausse le LLR Aaronson.
+
+**Implémentation :** `calib_pass.py` — une passe 7B par document, grille `(T, top_p) ∈ {0.8,0.9,1.0} × {0.9,0.95,1.0}` → `output/calib_T{t}_p{p}_{split}.npz`. Job SLURM **15402077** (train+val, ~30 s). `calib_search.py` : stage 1 = exact seul (`binned50_edge_lo_ps2_exactonly`), stage 2 = exact dans le pipeline complet.
+
+**Résultats CV (exact isolé, TPR@0.1%FPR) :**
+
+| Tag (T, top_p) | CV |
+| -------------- | --- |
+| T0.8_p0.9 | 0.0727 |
+| T0.8_p0.95 | 0.1095 |
+| T0.8_p1.0 | 0.1929 |
+| T0.9_p0.9 | 0.0997 |
+| T0.9_p0.95 | 0.1552 |
+| T0.9_p1.0 | 0.2267 |
+| T1.0_p0.9 | 0.1368 |
+| T1.0_p0.95 | 0.2057 |
+| **T1.0_p1.0** | **0.2478** |
+| raw `logp` (identique) | 0.2478 |
+
+**Stage 2 (pipeline complet) :**
+
+| Config | CV |
+| ------ | --- |
+| `b50_ps2_elo_entbin5_iso` (sans exact) | **0.4301** |
+| + exact calibré T1.0_p1.0 | 0.3573 |
+
+**Verdict :** la calibration T/top-p **ne débloque pas** l'exact LLR. Le meilleur cas calibré = logits bruts (T=1, pas de top-p), confirmant que le mismatch n'est pas simplement « oublier top-p » — probablement d'autres paramètres de génération cachés ou un mécanisme différent. **Ne pas réinvestir.**
+
+### 20.2 Point 2 — Données synthétiques (code prêt, job GPU en attente)
+
+**Implémentation :** `gen_synthetic.py` — génération réelle via les 4 générateurs vendor (GumbelmaxGenerator, TextSealGenerator, WatermarkLogitsProcessor KGW, GPTWatermark Unigram), contexte clean 32 tokens tiré du train/val, 6 longueurs canoniques × 4 schémas × N docs/cellule. Self-check z par schéma en fin de run. Entropie 7B enregistrée pendant la génération → `entropy_synth.npz`.
+
+**Intégration fit :** `fit_smm.py` (`synthetic_docs=`), `cv_smm.py` (`load_synthetic`, config `b50_ps2_elo_entbin5_iso_synth`, flag `use_synthetic=True`).
+
+**Statut compute :** scripts SLURM `run_synth_smoke.sh` (devel, n=3/cellule) et `run_synth.sh` (prod, n=30/cellule → 720 docs synth). **Non exécutés** — accès JURECA interrompu (master SSH stale, TOTP consommé sans auth). À relancer dès reconnexion.
+
+**Commande prod (JURECA) :**
+```bash
+cd task_1_text_watermark/alexandre && sbatch run_synth.sh
+# puis CV : python cv_smm.py --configs b50_ps2_elo_entbin5_iso b50_ps2_elo_entbin5_iso_synth
+```
+
+### 20.3 Point 3 — Couverture géométrique multi-échelle (négatif sur public)
+
+**Implémentation :** `multiscale.py` — fenêtres dyadiques (stride L/2, min_len=24, pattern TextSeal `_geometric_cover_search`), boost du log-odds SMM : `log_odds += w * max_window_z`. Option boundary smoother (moving average). Paramètres dans `SmmParams` : `multiscale_weight`, `boundary_window`, etc.
+
+**Résultats CV 5-fold :**
+
+| Config | CV TPR@0.1%FPR |
+| ------ | -------------- |
+| `b50_ps2_elo_entbin5_iso` (baseline) | **0.4301** |
+| + multiscale w=0.2 (`_ms02`) | 0.4315 |
+| + multiscale w=0.5 | 0.4163 |
+| + boundary w=20 | 0.4305 |
+| + ms0.2 + boundary | 0.4345 |
+
+Légère amélioration CV avec w=0.2 (+0.0014 absolu). **Soumission #1513** (`_ms02`) → **public 0.3364** (−0.0126 vs #994). Sur-ajustement val / dégradation test — **rejeté**. Le SMM forward-backward avec prior de longueurs canoniques capture déjà l'essentiel de la localisation ; le boost géométrique post-hoc ajoute du bruit au seuil 0.1% FPR.
+
+### 20.4 Fichiers ajoutés / modifiés (session 2026-07-03)
+
+| Fichier | Rôle |
+| ------- | ---- |
+| `calib_pass.py`, `run_calib.sh`, `calib_search.py` | Point 1 — grille T/top-p |
+| `gen_synthetic.py`, `run_synth.sh`, `run_synth_smoke.sh` | Point 2 — génération synthétique |
+| `multiscale.py` | Point 3 — couverture géométrique |
+| `smm_scorer.py` | boost multiscale/boundary sur log-odds |
+| `fit_smm.py` | `synthetic_docs`, params multiscale |
+| `cv_smm.py` | configs `_ms*`, `_bnd*`, `_synth`, `load_synthetic`, `load_p_target_tag` |
+
+**Prochaine action prioritaire :** reconnecter JURECA → `sbatch run_synth.sh` → CV avec `b50_ps2_elo_entbin5_iso_synth`. Pipeline prod reste #994 (`b50_ps2_elo_entbin5_iso`).
