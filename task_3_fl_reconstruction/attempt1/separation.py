@@ -90,7 +90,8 @@ def isolated_recovery(
     sim_threshold: float = 0.90,
     own_active: torch.Tensor | None = None,
     row_priority: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, torch.Tensor]:
+    return_raw: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor] | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Cluster analytic rows into single-image reconstructions.
 
     Args:
@@ -102,13 +103,20 @@ def isolated_recovery(
       row_priority: optional (N,) score (e.g. own_margin). When given it is the
         PRIMARY ranking (seed order + cluster confidence), which the synthetic
         benchmark shows beats norm/quality ranking on mixture-heavy models.
+      return_raw: also return the same per-cluster selection in RAW row space
+        (D,), i.e. before the family-specific `to_rgb` mapping. Useful when a
+        downstream step needs the denoised feature-map target itself (e.g.
+        feeding CNN fc1-input targets into `cnn_invert`'s pixel optimizer)
+        rather than the RGB preview.
 
-    Returns (images, confidence): images (K,3,64,64) one per cluster, sorted by
-    descending confidence; confidence (K,) in ~[0,1].
+    Returns (images, confidence) one per cluster, sorted by descending
+    confidence; confidence (K,) in ~[0,1]. If `return_raw`, also returns `raw`
+    (K, D): the same clusters/representatives, in raw row space.
     """
     n = rows.shape[0]
     if n == 0:
-        return torch.empty(0, *config.IMG_SHAPE), torch.empty(0)
+        empty = (torch.empty(0, *config.IMG_SHAPE), torch.empty(0))
+        return empty + (torch.empty(0, rows.shape[1]),) if return_raw else empty
 
     c, h, w = feature_shape
     imgs = to_rgb(rows)                                  # (N,3,64,64) in [0,1]
@@ -128,6 +136,7 @@ def isolated_recovery(
     clusters = [[int(order[j]) for j in cl] for cl in clusters_ord]
 
     reps: list[torch.Tensor] = []
+    raw_reps: list[torch.Tensor] = []
     confs: list[float] = []
     quality = utils.quality_score(imgs)
     qn = (quality - quality.min()) / (quality.max() - quality.min() + 1e-8)
@@ -142,8 +151,10 @@ def isolated_recovery(
             # the safer choice for SSIM.
             best = members[int(torch.argmax(row_priority[members]))]
             reps.append(imgs[best:best + 1])
+            raw_reps.append(rows[best:best + 1])
         else:
             reps.append(imgs[members].mean(dim=0, keepdim=True))
+            raw_reps.append(rows[members].mean(dim=0, keepdim=True))
 
         size = len(cl)
         if size > 1:
@@ -165,6 +176,10 @@ def isolated_recovery(
     images = torch.cat(reps, dim=0)
     confidence = torch.tensor(confs)
     o = torch.argsort(confidence, descending=True)
+    if return_raw:
+        raw = torch.cat(raw_reps, dim=0)
+        return (images[o].contiguous().float(), confidence[o].contiguous(),
+                raw[o].contiguous().float())
     return images[o].contiguous().float(), confidence[o].contiguous()
 
 

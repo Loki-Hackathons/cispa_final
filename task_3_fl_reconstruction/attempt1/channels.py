@@ -174,10 +174,18 @@ def transmit_features_to_rgb(
     if (h, w) != (64, 64):
         rgb = F.interpolate(rgb, size=(64, 64), mode="bilinear", align_corners=False)
 
-    # Per-image min/max normalisation (matches the 0.2469 baseline). The grader
-    # uses a fixed [0,1] data_range, so stretching each recon to full contrast
-    # matches the true image better than clamping a compressed-range recon.
-    return utils.to_unit(rgb).float(), True
+    # Per-image, PER-CHANNEL min/max normalisation. Each RGB channel was
+    # recovered through its OWN transmit tap with its own scale `s`; a global
+    # (all-channels) min/max lets whichever channel has the widest recovered
+    # range dominate and squash the others, which is the likely cause of the
+    # false-colour ("psychedelic") casts seen on model 12 (sigmoid transmit,
+    # where the logit inversion is most sensitive to per-channel scale
+    # mismatch near saturation). Normalizing each channel independently keeps
+    # per-channel contrast honest and was strictly >= the previous global
+    # normalisation on a synthetic scale-mismatch probe (see git history for
+    # this change) — still validate visually with `reconstruct_v2.py
+    # --diagnose` on the real model 12 before trusting on other models.
+    return utils.to_unit_per_channel(rgb).float(), True
 
 
 def report(model_ids: list[int]) -> None:

@@ -30,6 +30,8 @@ import torch.nn.functional as F
 
 import config
 import fc1_analytic
+import reconstruct_v2
+import separation
 import utils
 
 
@@ -71,6 +73,50 @@ def analytic_feature_candidates(
     return grad, cands.feats[idx], cands.preview[idx]
 
 
+def analytic_feature_candidates_v2(i: int):
+    """v2 target selection: cluster fc1 analytic rows (separation.py) instead of
+    the legacy `fc1_analytic` per-row heuristic.
+
+    `bench_selection.py` shows `own_margin` + clustering (isolated_recovery) is
+    the best label-free row selector we have; using its DENOISED raw feature-map
+    representatives (averaged/cleanest member per cluster) as the optimization
+    target, instead of raw un-clustered fc1 rows, should give `invert_one_model`
+    a cleaner target to fit. Returns (grad, feats, preview) like the legacy
+    `analytic_feature_candidates`, but with at most one row per distinct image
+    (K <= 128, not padded — callers pad the resulting RGB afterwards).
+    """
+    grad = utils.load_gradient(i)
+    gr = grad["gradients"]
+    gW, gb = gr["fc1.weight"], gr["fc1.bias"]
+    rows, valid = separation.analytic_rows(gW, gb)
+    if rows.shape[0] == 0:
+        raise RuntimeError(f"model{i}: no fc1 analytic rows")
+
+    fc, fh, fw = tuple(grad["feature_shape"])
+    if fc * fh * fw != rows.shape[1]:
+        fc = gr["conv.weight"].shape[0] if "conv.weight" in gr else 1
+        fh, fw = utils.infer_square(rows.shape[1], fc)
+        if fc * fh * fw != rows.shape[1]:
+            raise RuntimeError(f"model{i}: cannot reshape fc1 rows ({rows.shape[1]}) "
+                               f"into a ({fc},?,?) feature map")
+
+    state = utils.load_state(i)
+    fcW, fcb = state["fc1.weight"][valid], state["fc1.bias"][valid]
+    margin = separation.own_margin(rows, fcW, fcb)
+    # to_rgb is only used here for clustering fingerprints / quality tie-break,
+    # never as the optimization target — cnn_invert fits pixels against the
+    # RAW feature map below, which sidesteps the transmit-filter closed form
+    # entirely (and thus the model12 sigmoid color-inversion bug).
+    to_rgb = reconstruct_v2._cnn_to_rgb(i, (fc, fh, fw))
+    _, _, raw = separation.isolated_recovery(
+        rows, (fc, fh, fw), to_rgb, sim_threshold=0.90, row_priority=margin,
+        return_raw=True,
+    )
+    feats = raw.reshape(raw.shape[0], fc, fh, fw)
+    preview = utils.flat_to_image(raw, (fc, fh, fw))
+    return grad, feats, preview
+
+
 def conv_features(x: torch.Tensor, state: dict, act: str, hw: tuple[int, int]):
     w = state["conv.weight"].to(x.device)
     b = state["conv.bias"].to(x.device)
@@ -95,12 +141,18 @@ def _tv_lr_for_shape(hw: tuple[int, int], lr: float, tv_weight: float) -> tuple[
 def invert_one_model(i: int, init: torch.Tensor, steps: int, lr: float,
                      tv_weight: float, device: str,
                      use_confidence: bool = True,
-                     confidence_weight: float = 0.55):
-    grad, target, preview = analytic_feature_candidates(
-        i,
-        use_confidence=use_confidence,
-        confidence_weight=confidence_weight,
-    )
+                     confidence_weight: float = 0.55,
+                     selector: str = "legacy"):
+    if selector == "v2":
+        grad, target, preview = analytic_feature_candidates_v2(i)
+        print(f"model{i:2d}: v2 selection -> {target.shape[0]} distinct targets "
+              f"(clustered, own_margin)")
+    else:
+        grad, target, preview = analytic_feature_candidates(
+            i,
+            use_confidence=use_confidence,
+            confidence_weight=confidence_weight,
+        )
     state = utils.load_state(i)
     act = grad["activation"]
     target = target.to(device)
@@ -108,10 +160,15 @@ def invert_one_model(i: int, init: torch.Tensor, steps: int, lr: float,
     lr, tv_weight = _tv_lr_for_shape(hw, lr, tv_weight)
     print(f"model{i:2d}: hw={hw} lr={lr:.4f} tv={tv_weight:.2e}")
 
+    n_targets = target.shape[0]
     if init is None:
         x = preview.clone()
     else:
-        x = init.clone()
+        # init may come from a 128-image base submission while the v2
+        # selector can yield fewer than 128 distinct clustered targets.
+        x = init[:n_targets].clone()
+        if x.shape[0] < n_targets:
+            x = torch.cat([x, preview[x.shape[0]:n_targets].clone()], dim=0)
     x = utils.to_unit(x).to(device).requires_grad_(True)
 
     opt = torch.optim.Adam([x], lr=lr)
@@ -141,6 +198,11 @@ def invert_one_model(i: int, init: torch.Tensor, steps: int, lr: float,
     out = best.detach().cpu().float()
     print(f"model{i:2d}: cnn inversion done best_feature_mse={best_loss:.6f} "
           f"quality={float(utils.quality_score(out).mean()):.4f}")
+    if out.shape[0] < config.BATCH:
+        # v2 selector gives K <= 128 distinct clusters; pad with augmented
+        # variants of the real optimized images (never noise) like the rest
+        # of the v2 pipeline (separation.keep_structured_and_fill).
+        out = separation.keep_structured_and_fill(out, config.BATCH)
     return out
 
 
@@ -155,6 +217,10 @@ def main():
     ap.add_argument("--no-confidence", action="store_true",
                     help="legacy selection: quality_score only")
     ap.add_argument("--confidence-weight", type=float, default=0.55)
+    ap.add_argument("--selector", choices=["legacy", "v2"], default="v2",
+                    help="target selection: legacy=fc1_analytic heuristic, "
+                         "v2=separation.isolated_recovery (own_margin + "
+                         "clustering, recommended: better on bench_selection.py)")
     args = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -167,7 +233,7 @@ def main():
                       for i in range(1, config.NUM_MODELS + 1)}
         print("[cnn_invert] no base found; using noise for non-CNN models")
 
-    print(f"[cnn_invert] device={device} models={args.models}")
+    print(f"[cnn_invert] device={device} models={args.models} selector={args.selector}")
     for i in args.models:
         init = submission.get(f"model{i}")
         submission[f"model{i}"] = invert_one_model(
@@ -175,6 +241,7 @@ def main():
             tv_weight=args.tv, device=device,
             use_confidence=not args.no_confidence,
             confidence_weight=args.confidence_weight,
+            selector=args.selector,
         )
 
     path = utils.save_submission(submission, args.out)

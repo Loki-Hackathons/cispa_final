@@ -89,6 +89,25 @@ def to_unit(x: torch.Tensor) -> torch.Tensor:
     return flat.reshape_as(x)
 
 
+def to_unit_per_channel(x: torch.Tensor) -> torch.Tensor:
+    """Per-image, PER-CHANNEL min-max normalize a batch (N,C,H,W) into [0,1].
+
+    Unlike `to_unit` (one global min/max per image across all channels), this
+    rescales each channel independently. Needed when channels were recovered
+    through independent, differently-scaled inversions (e.g. `channels.py`'s
+    per-input-channel transmit-filter scale): a global min/max lets whichever
+    channel happens to have the widest recovered range dominate, squashing the
+    others and producing false colour casts. Flat channels map to zeros.
+    """
+    n, c = x.shape[0], x.shape[1]
+    flat = x.reshape(n, c, -1)
+    lo = flat.min(dim=2, keepdim=True).values
+    hi = flat.max(dim=2, keepdim=True).values
+    span = (hi - lo).clamp_min(1e-8)
+    flat = (flat - lo) / span
+    return flat.reshape_as(x)
+
+
 def features_to_image(rows: torch.Tensor, channels: int, hc: int, wc: int) -> torch.Tensor:
     """Map reconstructed feature rows -> (N,3,64,64) in [0,1].
 
